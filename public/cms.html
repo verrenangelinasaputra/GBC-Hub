@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172554">
+  <title>GBC Cash Management</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="/" aria-label="Home">
+        <span class="brand-mark">G</span>
+        <span><b>GBC <i>CASH</i></b><small>CASH MANAGEMENT</small></span>
+      </a>
+      <div class="nav-label">MENU</div>
+      <nav class="nav" id="sideNav"></nav>
+      <div class="sidebar-bottom">
+        <div class="sidebar-note"><span class="note-icon">✦</span><b>Pencatatan terpusat</b><p>Kas Besar dan Kas Kecil dengan hak akses berbasis role.</p></div>
+        <div class="side-status"><i></i><span id="connectionLabel">Memuat sesi...</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobileMenu" aria-label="Menu">☰</button>
+        <div class="crumb"><span>Cash Management</span><b>/</b><strong id="crumbCurrent">—</strong></div>
+        <div class="top-right">
+          <span class="today" id="todayLabel"></span>
+          <div class="user-chip" id="userChip"></div>
+          <button class="logout-btn" id="logoutBtn">Keluar</button>
+        </div>
+      </header>
+      <div class="content" id="appRoot"></div>
+      <footer class="footer"><b>GBC CASH MANAGEMENT</b><span>Internal · Kas Besar &amp; Kas Kecil</span></footer>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/cms.js"></script>
+</body>
+</html>

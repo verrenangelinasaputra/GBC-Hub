@@ -1,0 +1,21 @@
+{
+  "kasBesar": [
+    "Operasional",
+    "Gaji & Tunjangan",
+    "Utilitas",
+    "Pembelian Aset",
+    "Marketing",
+    "Perjalanan Dinas",
+    "Pajak & Retribusi",
+    "Lain-lain"
+  ],
+  "kasKecil": [
+    "Beban Alat Tulis Kantor",
+    "Beban Konsumsi",
+    "Beban Transport",
+    "Beban Perjalanan Dinas",
+    "Beban Operasional Lainnya",
+    "Lain-lain"
+  ],
+  "_note": "Sesuaikan dengan dropdown Google Form Kas Kecil / Kas Besar."
+}
