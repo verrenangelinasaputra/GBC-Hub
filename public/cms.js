@@ -7,6 +7,12 @@ let state = {
   permissions: null,
   links: {},
   categories: { kasBesar: [], kasKecil: [] },
+  entities: [],
+  formOptions: { kas_besar: null, kas_kecil: null },
+  driveUploadReady: false,
+  driveUploadHint: "",
+  driveUpload: null,
+  hubSheetMode: true,
   sheetsReady: false,
   geminiReady: false
 };
@@ -173,28 +179,98 @@ function routeInfo() {
   const p = window.location.pathname;
   if (p.includes("/owner/business-units")) return { view: "ownerBu", kind: null, title: "Business Unit" };
   if (p.includes("/owner/dashboard")) return { view: "dashboard", kind: null, title: "Dashboard Owner" };
-  if (p.includes("/admin/kas-kecil/recap")) return { view: "kkRecap", kind: "kas_kecil", title: "Recap Dashboard" };
-  if (p.includes("/super-admin/recap")) return { view: "saRecap", kind: null, title: "Recap Dashboard" };
-  if (p.includes("kas-besar")) return { view: "kas", kind: "kas_besar", title: "Kas Besar (Bank)" };
-  if (p.includes("kas-kecil")) return { view: "kas", kind: "kas_kecil", title: "Kas Kecil" };
+  if (p.includes("/admin/user-access")) return { view: "userAccess", kind: null, title: "User Access" };
+  if (p.includes("/member/welcome")) return { view: "memberWelcome", kind: null, title: "Selamat datang" };
+  if (p.includes("/kas-besar/history")) {
+    return { view: "kas", kind: "kas_besar", layout: "history", title: "Bank — History data" };
+  }
+  if (p.includes("/kas-besar/dashboard")) {
+    return { view: "kasDashboard", kind: "kas_besar", title: "Bank — Dashboard" };
+  }
+  if (p.includes("/kas-besar/form") || p.includes("kas-besar")) {
+    return { view: "kas", kind: "kas_besar", layout: "form", title: "Bank — Form" };
+  }
+  if (p.includes("/kas-kecil/history")) {
+    return { view: "kas", kind: "kas_kecil", layout: "history", title: "Kas Kecil — History data" };
+  }
+  if (p.includes("/kas-kecil/dashboard") || p.includes("/admin/kas-kecil/recap")) {
+    return { view: "kasDashboard", kind: "kas_kecil", title: "Kas Kecil — Dashboard" };
+  }
+  if (p.includes("/kas-kecil/form") || p.includes("kas-kecil")) {
+    return { view: "kas", kind: "kas_kecil", layout: "form", title: "Kas Kecil — Form" };
+  }
+  if (p.includes("/super-admin/recap")) return { view: "kasDashboard", kind: "kas_besar", title: "Bank — Dashboard" };
   return { view: "unknown", kind: null, title: "—" };
+}
+
+function kasMenuBasePath(kind) {
+  const isBesar = kind === "kas_besar";
+  const role = state.user?.role;
+  if (role === "admin") return isBesar ? "/admin/kas-besar" : "/admin/kas-kecil";
+  if (role === "super_admin") return isBesar ? "/super-admin/kas-besar" : "/super-admin/kas-kecil";
+  if (role === "owner") return isBesar ? "/owner/kas-besar" : "/owner/kas-kecil";
+  if (role === "member") return isBesar ? "/member/kas-besar" : "/member/kas-kecil";
+  return null;
+}
+
+function userCanSubmitKind(kind) {
+  const isBesar = kind === "kas_besar";
+  const role = state.user?.role;
+  if (role === "super_admin") return true;
+  if (role === "admin") return !isBesar;
+  if (role === "member") {
+    return isBesar ? !!state.permissions?.submitKasBesar : !!state.permissions?.submitKasKecil;
+  }
+  return false;
+}
+
+function kasNavGroup(kind) {
+  const isBesar = kind === "kas_besar";
+  const role = state.user?.role;
+  if (role === "member") {
+    if (isBesar && !state.permissions?.kasBesar) return null;
+    if (!isBesar && !state.permissions?.kasKecil) return null;
+  }
+  const base = kasMenuBasePath(kind);
+  if (!base) return null;
+  const children = [];
+  if (userCanSubmitKind(kind)) {
+    children.push({ href: `${base}/form`, label: "Form" });
+  }
+  children.push({ href: `${base}/history`, label: "History data" });
+  children.push({ href: `${base}/dashboard`, label: "Dashboard" });
+  return {
+    group: isBesar ? "kas-besar" : "kas-kecil",
+    label: isBesar ? "Bank" : "Kas Kecil",
+    icon: isBesar ? "▦" : "◫",
+    children
+  };
 }
 
 function navItems() {
   const role = state.user?.role;
   const items = [];
+  const kb = kasNavGroup("kas_besar");
+  const kk = kasNavGroup("kas_kecil");
   if (role === "owner") {
     items.push({ href: "/owner/dashboard", label: "Dashboard Rekap", icon: "⌁" });
     items.push({ href: "/owner/business-units", label: "Business Unit", icon: "◉" });
-    items.push({ href: "/owner/kas-besar", label: "Kas Besar", icon: "▦" });
-    items.push({ href: "/owner/kas-kecil", label: "Kas Kecil", icon: "◫" });
+    if (kb) items.push(kb);
+    if (kk) items.push(kk);
   } else if (role === "super_admin") {
-    items.push({ href: "/super-admin/recap", label: "Recap Dashboard", icon: "⌁" });
-    items.push({ href: "/super-admin/kas-besar", label: "Kas Besar", icon: "▦" });
-    items.push({ href: "/super-admin/kas-kecil", label: "Kas Kecil", icon: "◫" });
+    if (kb) items.push(kb);
+    if (kk) items.push(kk);
+    items.push({ href: "/admin/user-access", label: "User Access", icon: "◎" });
   } else if (role === "admin") {
-    items.push({ href: "/admin/kas-kecil", label: "Kas Kecil", icon: "◫" });
-    items.push({ href: "/admin/kas-kecil/recap", label: "Recap Dashboard", icon: "⌁" });
+    if (kb) items.push(kb);
+    if (kk) items.push(kk);
+    items.push({ href: "/admin/user-access", label: "User Access", icon: "◎" });
+  } else if (role === "member") {
+    if (kk) items.push(kk);
+    if (kb) items.push(kb);
+    if (!state.permissions?.kasKecil && !state.permissions?.kasBesar) {
+      items.push({ href: "/member/welcome", label: "Beranda", icon: "⌂" });
+    }
   }
   return items;
 }
@@ -204,6 +280,29 @@ function renderNav() {
   nav.replaceChildren();
   const path = window.location.pathname;
   for (const item of navItems()) {
+    if (item.group) {
+      const details = document.createElement("details");
+      details.className = "nav-group";
+      const childActive = item.children.some(c => path === c.href || path.startsWith(c.href + "/"));
+      const seg = item.group === "kas-besar" ? "/kas-besar" : "/kas-kecil";
+      if (childActive || path.includes(seg)) details.open = true;
+      const summary = document.createElement("summary");
+      summary.className = "nav-link nav-group-summary" + (childActive ? " active" : "");
+      summary.innerHTML = `<span>${item.icon}</span> ${escapeHtml(item.label)}`;
+      details.append(summary);
+      const sub = document.createElement("div");
+      sub.className = "nav-sub";
+      for (const child of item.children) {
+        const a = document.createElement("a");
+        a.className = "nav-link nav-sublink" + (path === child.href ? " active" : "");
+        a.href = child.href;
+        a.textContent = child.label;
+        sub.append(a);
+      }
+      details.append(sub);
+      nav.append(details);
+      continue;
+    }
     const a = document.createElement("a");
     a.className = "nav-link" + (path === item.href ? " active" : "");
     a.href = item.href;
@@ -212,27 +311,53 @@ function renderNav() {
   }
 }
 
+function formatRoleLabel(role) {
+  if (role === "admin") return "Admin";
+  if (role === "super_admin") return "Super Admin";
+  if (role === "owner") return "Owner";
+  if (role === "member") return "Member";
+  return String(role || "").replace(/_/g, " ");
+}
+
 function setUserChip() {
   const u = state.user;
+  const title = u?.display_name || u?.username || "";
+  const subtitle = u?.role === "admin" ? u.username : formatRoleLabel(u?.role);
   $("#userChip").innerHTML = u
-    ? `<span class="avatar">${escapeHtml((u.display_name || u.username).slice(0, 1).toUpperCase())}</span><span><b>${escapeHtml(u.display_name)}</b><small>${escapeHtml(u.role.replace("_", " "))}</small></span>`
+    ? `<span class="avatar">${escapeHtml(title.slice(0, 1).toUpperCase())}</span><span><b>${escapeHtml(title)}</b><small>${escapeHtml(subtitle)}</small></span>`
     : "";
   $("#connectionLabel").textContent = u ? "Session aktif" : "Belum login";
 }
 
 async function api(url, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (options.method && options.method !== "GET") {
+  const { progressLabel, silentProgress, ...fetchOpts } = options;
+  const headers = { ...(fetchOpts.headers || {}) };
+  if (fetchOpts.method && fetchOpts.method !== "GET") {
     headers["X-CSRF-Token"] = state.csrf;
   }
-  const res = await fetch(url, { credentials: "same-origin", ...options, headers });
-  const data = await res.json().catch(() => ({}));
-  if (res.status === 401) {
-    window.location.href = "/login";
-    throw new Error("Session berakhir.");
+  if (fetchOpts.body instanceof FormData) {
+    delete headers["Content-Type"];
   }
-  if (!res.ok) throw new Error(data.error || `Request gagal (${res.status})`);
-  return data;
+  let label = progressLabel;
+  if (!label && !silentProgress) {
+    label =
+      fetchOpts.method === "POST" || fetchOpts.method === "PATCH" || fetchOpts.method === "DELETE"
+        ? "Menyimpan…"
+        : "Memuat data…";
+  }
+  if (!silentProgress && typeof progressStart === "function") progressStart(label);
+  try {
+    const res = await fetch(url, { credentials: "same-origin", ...fetchOpts, headers });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      window.location.href = "/login";
+      throw new Error("Session berakhir.");
+    }
+    if (!res.ok) throw new Error(data.error || `Request gagal (${res.status})`);
+    return data;
+  } finally {
+    if (!silentProgress && typeof progressDone === "function") progressDone();
+  }
 }
 
 function openExternal(url) {
@@ -470,29 +595,125 @@ async function loadOwnerInsights(silent) {
   }
 }
 
-function renderKasPage(root, kind) {
+function formSelectOptions(list, placeholder) {
+  const opts = (list || []).map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
+  return `<option value="">${escapeHtml(placeholder)}</option>${opts}`;
+}
+
+function renderKasPage(root, kind, layout = "form") {
   const isBesar = kind === "kas_besar";
-  const title = isBesar ? "Kas Besar (Bank)" : "Kas Kecil";
+  if (layout === "form" && !userCanSubmitKind(kind)) {
+    const base = kasMenuBasePath(kind);
+    if (base) {
+      window.location.replace(`${base}/history`);
+      return;
+    }
+  }
+  const showForm = layout === "form";
+  const showHistory = layout === "history";
+  const title = isBesar
+    ? layout === "history"
+      ? "Bank — History data"
+      : "Bank — Form"
+    : layout === "history"
+      ? "Kas Kecil — History data"
+      : "Kas Kecil — Form";
   const apiBase = isBesar ? "/api/kas-besar/transactions" : "/api/kas-kecil/transactions";
-  const cats = isBesar ? state.categories.kasBesar : state.categories.kasKecil;
-  const formLink = isBesar ? state.links.kasBesarForm : state.links.kasKecilForm;
-  const sheetLink = isBesar ? state.links.kasBesarSheet : state.links.kasKecilSheet;
+  const fo = state.formOptions?.[kind] || {};
+  const cats = fo.categories?.length ? fo.categories : (isBesar ? state.categories.kasBesar : state.categories.kasKecil);
+  const entities = fo.entities?.length ? fo.entities : state.entities;
+  const sumberList = fo.sumberDana || [];
+  const hubLink = isBesar
+    ? state.links.kasBesarSheet || state.links.hubSpreadsheet
+    : state.links.kasKecilSheet || state.links.hubSpreadsheet;
+  const canSubmit = userCanSubmitKind(kind);
+  const dis = canSubmit ? "" : "disabled";
+  const picName = state.user?.display_name || state.user?.username || "";
+  const formTitle = fo.title || (isBesar ? "Form Pengeluaran Bank" : "Form Pengeluaran Kas Kecil");
+  const formSub = fo.subtitle || "";
+  const namaHint = isBesar
+    ? "Contoh: Pembelian ATK, pembayaran tagihan listrik, pembayaran ekspedisi."
+    : "Contoh: Pembelian perlengkapan kantor, biaya parkir, kebutuhan operasional.";
+  const uploadNote = state.driveUploadReady
+    ? "Unggah kuitansi/invoice (PDF, foto). Maks. 5 file × 10 MB."
+    : (state.driveUploadHint ||
+      "Upload otomatis tidak aktif — upload bukti manual ke folder Drive, lalu tempel link di bawah.");
 
   root.innerHTML = `
-    <div class="page-heading"><small>${isBesar ? "BANK" : "PETTY CASH"}</small><h1>${title}</h1>
-      <p>Input transaksi lewat <strong>Google Form</strong>. Data otomatis masuk spreadsheet — tabel di bawah membaca sheet yang sama (refresh untuk update).</p>
+    <div class="page-heading"><small>${isBesar ? "BANK" : "PETTY CASH"}</small><h1>${escapeHtml(title)}</h1>
+      <p>${escapeHtml(formSub)} Pastikan data benar dan bukti dilampirkan. Data masuk tab <strong>${escapeHtml(isBesar ? (state.links.kasBesarTab || "Bank") : (state.links.kasKecilTab || "KAS KECIL"))}</strong>.</p>
     </div>
-    <div class="shortcut-grid">
-      <article class="panel shortcut-card primary-shortcut">
-        <div class="form-title"><span class="feature-icon">＋</span><div><h3>Form bukti pengeluaran</h3><p>Isi transaksi baru di Google Form (tab baru).</p></div></div>
-        <button type="button" class="btn btn-primary btn-full" id="extForm">Buka Google Form ↗</button>
-      </article>
-      <article class="panel shortcut-card">
-        <div class="form-title"><span class="feature-icon">▤</span><div><h3>Spreadsheet rekap</h3><p>Lihat atau edit data langsung di Google Sheets.</p></div></div>
-        <button type="button" class="btn btn-soft btn-full" id="extSheet">Buka Spreadsheet ↗</button>
-      </article>
+    <div class="kas-layout${showHistory && !showForm ? " kas-layout-single" : ""}">
+      ${showForm ? `<article class="panel primary-shortcut" id="txFormPanel">
+        <div class="form-title"><span class="feature-icon">＋</span><div><h3>${escapeHtml(formTitle)}</h3><p>GBC Cash Management — pertanyaan selaras formulir resmi.</p></div></div>
+        ${canSubmit ? "" : '<div class="inline-message">Anda belum punya akses input halaman ini. Hubungi admin untuk mengaktifkan Kas Kecil dan/atau Bank.</div>'}
+        <form class="form-grid" id="txForm" enctype="multipart/form-data" novalidate>
+          <label>1. Tanggal Pengeluaran <span class="req">*</span>
+            <input type="date" name="tanggal" required ${dis}>
+          </label>
+          <label>2. Entitas Pengeluaran <span class="req">*</span>
+            <select name="entitas" required ${dis}>${formSelectOptions(entities, "— Pilih entitas —")}</select>
+          </label>
+          <label>3. Kategori Pengeluaran <span class="req">*</span>
+            <select name="category" required ${dis}>${formSelectOptions(cats, "— Pilih kategori —")}</select>
+          </label>
+          <label>4. Nama Transaksi <span class="req">*</span>
+            <input type="text" name="namaTransaksi" required maxlength="200" ${dis}>
+            <span class="form-hint">${escapeHtml(namaHint)}</span>
+          </label>
+          <label>5. Jumlah Pengeluaran (Rp) <span class="req">*</span>
+            <input type="text" name="amount" inputmode="numeric" placeholder="500000" required ${dis}>
+            <span class="form-hint">Nominal tanpa simbol Rp. Harus lebih dari 0.</span>
+          </label>
+          <label>6. Keterangan Pengeluaran
+            <textarea name="keterangan" rows="3" ${dis}></textarea>
+            <span class="form-hint">Detail atau tujuan pengeluaran (opsional).</span>
+          </label>
+          <label>7. Dibayarkan Kepada <span class="req">*</span>
+            <input type="text" name="dibayarkan" required ${dis}>
+            <span class="form-hint">Nama penerima, vendor, atau pihak terkait.</span>
+          </label>
+          <label>8. ${isBesar ? "Sumber Dana Bank" : "Sumber Dana Kas Kecil"} <span class="req">*</span>
+            <select name="sumberDana" required ${dis}>${formSelectOptions(sumberList, "— Pilih sumber dana —")}</select>
+          </label>
+          ${
+            state.driveUploadReady
+              ? `<label>9. Bukti Transaksi <span class="req">*</span>
+            <input type="file" name="buktiFiles" accept="image/*,application/pdf,.pdf,.png,.jpg,.jpeg,.webp" multiple ${dis} ${canSubmit ? "required" : ""}>
+            <span class="form-hint">${escapeHtml(uploadNote)}</span>
+          </label>
+          <label>Link bukti (opsional jika sudah upload)
+            <input type="url" name="bukti" placeholder="https://drive.google.com/..." ${dis}>
+          </label>`
+              : `<div class="bukti-link-panel inline-message">
+            <b>9. Bukti Transaksi</b> — ${escapeHtml(uploadNote)}
+            ${
+              canSubmit && state.driveUpload?.oauthConnectUrl
+                ? `<p style="margin:12px 0 0"><a class="btn btn-primary" href="${state.driveUpload.oauthConnectUrl}">Hubungkan Google Drive (sekali, admin/superadmin)</a></p>`
+                : ""
+            }
+          </div>
+          <label>Link bukti transaksi <span class="req">*</span>
+            <input type="url" name="bukti" placeholder="https://drive.google.com/file/d/…/view" required ${dis}>
+            <span class="form-hint">Sementara OAuth belum aktif, tempel link file yang sudah di-upload manual.</span>
+          </label>`
+          }
+          <label>10. Nama PIC <span class="req">*</span>
+            <input type="text" name="pic" value="${escapeHtml(picName)}" readonly required class="input-locked">
+            <span class="form-hint">Terisi otomatis dari akun yang login (${escapeHtml(picName)}).</span>
+          </label>
+          <div class="form-actions">
+            ${canSubmit ? '<button class="btn btn-primary" type="submit" id="txSubmit">Simpan &amp; update rekap</button><button class="btn btn-soft" type="reset">Reset</button>' : ""}
+          </div>
+        </form>
+        <div id="txFormMessage" class="inline-message hidden"></div>
+      </article>` : ""}
+      ${showHistory ? `<article class="panel shortcut-card">
+        <div class="form-title"><span class="feature-icon">▤</span><div><h3>Spreadsheet hub</h3><p>Tab input, compiled table, entitas, laporan bulanan.</p></div></div>
+        <button type="button" class="btn btn-soft btn-full" id="extSheet">Buka spreadsheet pusat ↗</button>
+      </article>` : ""}
     </div>
-    <div id="sheetNotice" class="inline-message"></div>
+    ${showHistory ? `<div id="sheetNotice" class="inline-message"></div>
     <div class="panel table-panel">
       <div class="panel-head"><div><h3>Tabel transaksi (dari Spreadsheet)</h3><p>Pagination, pencarian, filter kategori</p></div><span class="panel-mark">LIVE SHEET</span></div>
       <div class="sheet-filter">
@@ -529,17 +750,60 @@ function renderKasPage(root, kind) {
       <div id="tableMessage" class="inline-message">Memuat...</div>
       <div class="table-scroll"><table><thead id="txHead"></thead><tbody id="txBody"></tbody></table></div>
       <div class="pager" id="pager"></div>
-    </div>`;
+    </div>` : ""}`;
 
-  $("#extForm").addEventListener("click", () => openExternal(formLink));
-  $("#extSheet").addEventListener("click", () => openExternal(sheetLink));
+  $("#extSheet")?.addEventListener("click", () => openExternal(hubLink));
+
+  const txForm = $("#txForm");
+  if (txForm) {
+    const dateInput = txForm.querySelector('input[name="tanggal"]');
+    if (dateInput && !dateInput.value) dateInput.value = todayIso();
+    txForm.addEventListener("submit", async e => {
+      e.preventDefault();
+      const msg = $("#txFormMessage");
+      const btn = $("#txSubmit");
+      const fd = new FormData(txForm);
+      const tanggalInput = txForm.querySelector('[name="tanggal"]');
+      if (tanggalInput?.value) fd.set("tanggal", tanggalInput.value);
+      btn.disabled = true;
+      msg.classList.remove("hidden", "error", "success");
+      msg.textContent = "Menyimpan…";
+      msg.className = "inline-message";
+      try {
+        const data = await api(apiBase, {
+          method: "POST",
+          body: fd,
+          progressLabel: "Menyimpan transaksi & upload bukti…"
+        });
+        msg.className = "inline-message success";
+        msg.textContent = data.message || "Tersimpan.";
+        toast(data.message || "Transaksi tersimpan.");
+        txForm.reset();
+        if (dateInput) dateInput.value = todayIso();
+        if (showHistory) {
+          page = 1;
+          await loadTable();
+        }
+      } catch (err) {
+        msg.className = "inline-message error";
+        msg.textContent = err.message;
+        toast(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
+  if (!showHistory) return;
 
   const notice = $("#sheetNotice");
   if (!state.sheetsReady) {
-    notice.textContent = "Google Service Account belum dikonfigurasi di server (.env). Tabel membutuhkan akses API ke spreadsheet.";
+    notice.textContent = "Google Service Account belum dikonfigurasi di server (.env). Service account butuh akses Editor ke spreadsheet hub.";
     notice.className = "inline-message error";
   } else {
-    notice.textContent = "Data diambil dari Google Spreadsheet. Setelah submit form, klik Refresh.";
+    notice.textContent = state.hubSheetMode
+      ? `Data dari spreadsheet hub (tab ${isBesar ? state.links.kasBesarTab || "Bank" : state.links.kasKecilTab || "KAS KECIL"}). Gunakan Refresh setelah input dari Form.`
+      : "Mode legacy: data dari sheet Form lama.";
     notice.className = "inline-message";
   }
 
@@ -564,6 +828,7 @@ function renderKasPage(root, kind) {
   let sort = "transaction_date";
   let order = "desc";
   let displayHeaders = [];
+  let forceSheetRefresh = false;
 
   async function loadTable() {
     const msg = $("#tableMessage");
@@ -572,6 +837,10 @@ function renderKasPage(root, kind) {
     $("#txBody").innerHTML = '<tr><td class="table-empty">Loading...</td></tr>';
     try {
       const q = new URLSearchParams({ page, perPage: $("#tPerPage").value, sort, order });
+      if (forceSheetRefresh) {
+        q.set("refresh", "1");
+        forceSheetRefresh = false;
+      }
       const s = $("#tSearch").value.trim();
       if (s) q.set("search", s);
       if ($("#tFrom").value) q.set("dateFrom", $("#tFrom").value);
@@ -612,7 +881,7 @@ function renderKasPage(root, kind) {
     const body = $("#txBody");
     body.replaceChildren();
     if (!data.rows.length) {
-      body.innerHTML = `<tr><td colspan="${colSpan}" class="table-empty">Belum ada data. Submit lewat Google Form lalu Refresh.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="${colSpan}" class="table-empty">Belum ada data. Isi form di menu Form atau klik Refresh.</td></tr>`;
     } else {
       const startNo = (data.page - 1) * data.perPage;
       data.rows.forEach((row, idx) => {
@@ -647,8 +916,14 @@ function renderKasPage(root, kind) {
     loadTable();
   }
 
+  function hardRefreshTable() {
+    page = 1;
+    forceSheetRefresh = true;
+    loadTable();
+  }
+
   let searchTimer;
-  $("#tRefresh").addEventListener("click", applyFilters);
+  $("#tRefresh").addEventListener("click", hardRefreshTable);
   $("#tCategory").addEventListener("change", applyFilters);
   $("#tFrom").addEventListener("change", applyFilters);
   $("#tTo").addEventListener("change", applyFilters);
@@ -952,10 +1227,16 @@ function renderRecapTrend(items) {
   });
 }
 
-function renderAdminKkRecap(root) {
+function kindLabel(kind) {
+  return kind === "kas_besar" ? "Bank" : "Kas Kecil";
+}
+
+function renderKindDashboard(root, kind) {
+  const label = kindLabel(kind);
+  const sumberPanel = kind === "kas_besar" ? "Sumber dana bank" : "Sumber dana kas kecil";
   root.innerHTML = `
-    <div class="page-heading"><small>ADMIN · KAS KECIL</small><h1>Recap Dashboard</h1>
-      <p>Ringkasan pengeluaran kas kecil dari spreadsheet — kategori, entitas, PIC, sumber dana, dan transaksi terbaru.</p></div>
+    <div class="page-heading"><small>${escapeHtml(label.toUpperCase())}</small><h1>Dashboard</h1>
+      <p>Ringkasan pengeluaran ${escapeHtml(label)} dari spreadsheet — kategori, entitas, PIC, sumber dana, dan transaksi terbaru.</p></div>
     <div class="sheet-filter">
       <div class="sheet-filter-head"><b>Periode recap</b><span>Filter berdasarkan tanggal pengeluaran</span></div>
       <div class="sheet-filter-grid recap-filter-grid">
@@ -976,7 +1257,7 @@ function renderAdminKkRecap(root) {
       <div class="panel recap-chart-panel"><div class="panel-head"><div><h3>Kategori pengeluaran</h3><p>Top nominal per kategori</p></div></div><div id="recapCat"></div></div>
       <div class="panel recap-chart-panel"><div class="panel-head"><div><h3>Entitas</h3><p>Proporsi pengeluaran per entitas</p></div></div><div id="recapEntity"></div></div>
       <div class="panel recap-chart-panel"><div class="panel-head"><div><h3>Nama PIC</h3><p>Top nominal per PIC</p></div></div><div id="recapPic"></div></div>
-      <div class="panel recap-chart-panel"><div class="panel-head"><div><h3>Sumber dana kas kecil</h3><p>Top nominal per sumber dana</p></div></div><div id="recapSumber"></div></div>
+      <div class="panel recap-chart-panel"><div class="panel-head"><div><h3>${escapeHtml(sumberPanel)}</h3><p>Top nominal per sumber dana</p></div></div><div id="recapSumber"></div></div>
     </div>
     <div class="panel table-panel"><div class="panel-head"><div><h3>Transaksi terbaru</h3><p>Sesuai kolom form: tanggal, entitas, kategori, nama transaksi, nominal, keterangan, dibayarkan, sumber dana, bukti, PIC</p></div></div>
       <div class="table-scroll"><table class="recap-table"><thead><tr>
@@ -988,21 +1269,23 @@ function renderAdminKkRecap(root) {
   const now = new Date();
   $("#recapTo").value = todayIso();
   $("#recapFrom").value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-  $("#recapRefresh").addEventListener("click", loadKkRecap);
-  $("#recapFrom").addEventListener("change", loadKkRecap);
-  $("#recapTo").addEventListener("change", loadKkRecap);
-  loadKkRecap();
+  root.dataset.kasDashboardKind = kind;
+  $("#recapRefresh").addEventListener("click", () => loadKindRecap(kind));
+  $("#recapFrom").addEventListener("change", () => loadKindRecap(kind));
+  $("#recapTo").addEventListener("change", () => loadKindRecap(kind));
+  loadKindRecap(kind);
 }
 
-async function loadKkRecap() {
+async function loadKindRecap(kind) {
   const msg = $("#recapMessage");
   msg.textContent = "Memuat data recap dari spreadsheet...";
   msg.className = "inline-message";
+  const apiPath = kind === "kas_besar" ? "/api/kas-besar/recap" : "/api/kas-kecil/recap";
   try {
     const q = new URLSearchParams();
     if ($("#recapFrom").value) q.set("dateFrom", $("#recapFrom").value);
     if ($("#recapTo").value) q.set("dateTo", $("#recapTo").value);
-    const data = await api("/api/admin/kas-kecil/recap?" + q.toString());
+    const data = await api(`${apiPath}?${q.toString()}`, { progressLabel: "Memuat dashboard…" });
     $("#recapTotal").textContent = rupiah(data.total);
     $("#recapCount").textContent = new Intl.NumberFormat("id-ID").format(data.count);
     $("#recapAvg").textContent = rupiah(data.average);
@@ -1147,6 +1430,116 @@ async function loadSuperAdminRecap() {
   }
 }
 
+function renderMemberWelcome(root) {
+  root.innerHTML = `
+    <div class="page-heading"><small>MEMBER</small><h1>Selamat datang</h1>
+      <p>Akun Anda sudah aktif, tetapi belum ada menu yang di-assign. Admin akan memberi akses <strong>Lihat</strong> (History + Dashboard) dan/atau <strong>Isi form</strong> untuk Kas Kecil / Bank di halaman User Access.</p>
+    </div>
+    <article class="panel"><p>Refresh halaman ini setelah admin memberi akses. Menu akan muncul di sidebar.</p></article>`;
+}
+
+async function renderUserAccess(root) {
+  root.innerHTML = `
+    <div class="page-heading"><small>ADMIN</small><h1>User Access</h1>
+      <p>Kelola akses user: <strong>Lihat</strong> = History + Dashboard · <strong>Isi form</strong> = bisa input transaksi (otomatis dapat lihat).</p>
+    </div>
+    <article class="panel">
+      <div id="userAccessMsg" class="inline-message" aria-live="polite"></div>
+      <div class="table-wrap"><table class="data-table user-access-table"><thead>
+        <tr><th rowspan="2">Nama</th><th rowspan="2">Email</th><th rowspan="2">Telepon</th>
+          <th colspan="2">Kas Kecil</th><th colspan="2">Bank</th><th rowspan="2"></th></tr>
+        <tr><th>Lihat</th><th>Isi form</th><th>Lihat</th><th>Isi form</th></tr>
+      </thead><tbody id="userAccessBody"><tr><td colspan="8">Memuat…</td></tr></tbody></table></div>
+      <p id="userAccessLink" class="login-foot" style="margin-top:12px"></p>
+    </article>`;
+  const msg = $("#userAccessMsg");
+  const body = $("#userAccessBody");
+  try {
+    const data = await api("/api/admin/users");
+    if (data.registryUrl) {
+      $("#userAccessLink").innerHTML = `<a href="${escapeHtml(data.registryUrl)}" target="_blank" rel="noopener">Buka spreadsheet registry ↗</a>`;
+    }
+    body.replaceChildren();
+    if (!data.users?.length) {
+      body.innerHTML = '<tr><td colspan="8">Belum ada user terdaftar.</td></tr>';
+      return;
+    }
+    for (const u of data.users) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(u.name)}</td>
+        <td>${escapeHtml(u.email)}</td>
+        <td>${escapeHtml(u.phone || "—")}</td>
+        <td><input type="checkbox" data-field="access_kas_kecil" ${u.access_kas_kecil ? "checked" : ""} title="History & Dashboard"></td>
+        <td><input type="checkbox" data-field="input_kas_kecil" ${u.input_kas_kecil ? "checked" : ""} title="Form input"></td>
+        <td><input type="checkbox" data-field="access_kas_besar" ${u.access_kas_besar ? "checked" : ""} title="History & Dashboard"></td>
+        <td><input type="checkbox" data-field="input_kas_besar" ${u.input_kas_besar ? "checked" : ""} title="Form input"></td>
+        <td class="user-access-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-save>Simpan</button>
+          <button type="button" class="btn btn-danger btn-sm" data-delete>Hapus</button>
+        </td>`;
+      const inputKk = tr.querySelector('[data-field="input_kas_kecil"]');
+      const inputKb = tr.querySelector('[data-field="input_kas_besar"]');
+      const viewKk = tr.querySelector('[data-field="access_kas_kecil"]');
+      const viewKb = tr.querySelector('[data-field="access_kas_besar"]');
+      inputKk.addEventListener("change", () => { if (inputKk.checked) viewKk.checked = true; });
+      inputKb.addEventListener("change", () => { if (inputKb.checked) viewKb.checked = true; });
+      tr.querySelector("[data-delete]").addEventListener("click", async () => {
+        const label = `${u.name} (${u.email})`;
+        if (!window.confirm(`Hapus akun ${label}? Tindakan ini tidak bisa dibatalkan.`)) return;
+        try {
+          msg.textContent = "";
+          msg.className = "inline-message";
+          const data = await api(`/api/admin/users/${encodeURIComponent(u.user_id)}`, {
+            method: "DELETE",
+            progressLabel: "Menghapus akun…"
+          });
+          tr.remove();
+          toast(data.message || "Akun dihapus.");
+          if (!body.querySelector("tr")) {
+            body.innerHTML = '<tr><td colspan="8">Belum ada user terdaftar.</td></tr>';
+          }
+        } catch (e) {
+          msg.textContent = e.message;
+          msg.className = "inline-message error";
+        }
+      });
+      tr.querySelector("[data-save]").addEventListener("click", async () => {
+        const access_kas_kecil = viewKk.checked;
+        const input_kas_kecil = inputKk.checked;
+        const access_kas_besar = viewKb.checked;
+        const input_kas_besar = inputKb.checked;
+        try {
+          msg.textContent = "";
+          msg.className = "inline-message";
+          const data = await api(`/api/admin/users/${encodeURIComponent(u.user_id)}/access`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              access_kas_kecil,
+              access_kas_besar,
+              input_kas_kecil,
+              input_kas_besar
+            })
+          });
+          const saved = data.access || {};
+          viewKk.checked = !!saved.access_kas_kecil;
+          inputKk.checked = !!saved.input_kas_kecil;
+          viewKb.checked = !!saved.access_kas_besar;
+          inputKb.checked = !!saved.input_kas_besar;
+          toast(data.message || "Akses disimpan.");
+        } catch (e) {
+          msg.textContent = e.message;
+          msg.className = "inline-message error";
+        }
+      });
+      body.append(tr);
+    }
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="8">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
 function renderApp() {
   const info = routeInfo();
   $("#crumbCurrent").textContent = info.title;
@@ -1155,9 +1548,10 @@ function renderApp() {
   root.replaceChildren();
   if (info.view === "dashboard") renderDashboard(root);
   else if (info.view === "ownerBu") renderOwnerBusinessUnits(root);
-  else if (info.view === "kkRecap") renderAdminKkRecap(root);
-  else if (info.view === "saRecap") renderSuperAdminRecap(root);
-  else if (info.view === "kas") renderKasPage(root, info.kind);
+  else if (info.view === "memberWelcome") renderMemberWelcome(root);
+  else if (info.view === "userAccess") renderUserAccess(root);
+  else if (info.view === "kasDashboard") renderKindDashboard(root, info.kind);
+  else if (info.view === "kas") renderKasPage(root, info.kind, info.layout || "form");
   else root.innerHTML = '<div class="inline-message error">Halaman tidak dikenali.</div>';
 }
 
@@ -1174,18 +1568,31 @@ async function bootstrap() {
     state.permissions = data.permissions;
     state.links = data.links || {};
     state.categories = data.categories || state.categories;
+    state.entities = data.entities || state.entities;
+    state.formOptions = data.formOptions || state.formOptions;
+    state.driveUploadReady = !!data.driveUploadReady;
+    state.driveUploadHint = data.driveUploadHint || data.driveUpload?.hint || "";
+    state.driveUpload = data.driveUpload || null;
+    state.hubSheetMode = data.hubSheetMode !== false;
     state.sheetsReady = !!data.sheetsReady;
     state.geminiReady = !!data.geminiReady;
     setUserChip();
     renderApp();
   } catch {
     window.location.href = "/login";
+  } finally {
+    if (typeof progressDone === "function") progressDone();
   }
 }
 
 $("#logoutBtn").addEventListener("click", async () => {
   try {
-    await api("/api/auth/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    await api("/api/auth/logout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+      progressLabel: "Keluar…"
+    });
   } catch { /* ignore */ }
   window.location.href = "/login";
 });

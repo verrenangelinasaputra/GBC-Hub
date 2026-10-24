@@ -1,13 +1,16 @@
 # GBC Cash Management — Kas Besar & Kas Kecil
 
-Portal internal dengan login username/password, Role-Based Access Control (RBAC), dan data dari Google Spreadsheet yang tersinkronisasi melalui Google Form.
+Portal internal dengan login username/password, RBAC, input transaksi via **web app**, dan data di **spreadsheet hub** Google Sheets.
 
 ## Alur Data
 
-1. Staff mengisi Google Form untuk Kas Besar atau Kas Kecil.
-2. Jawaban masuk ke Google Spreadsheet yang terhubung.
-3. Website membaca spreadsheet melalui API untuk menampilkan tabel transaksi dan dashboard Owner.
-4. Website tidak menyediakan form input transaksi dan tidak menggunakan file database `.db` lokal.
+1. Staff login → isi form **Kas Kecil** (admin) atau **Kas Besar** (super admin) di web.
+2. Baris baru masuk tab **KAS KECIL** / **KAS BESAR** di spreadsheet hub (`HUB_SPREADSHEET_ID`).
+3. Server otomatis **compile** ke `compiled table`, tab **ENTITAS**, dan **LAPORAN BULANAN**.
+4. Dashboard Owner / recap membaca tab input yang sama. Tidak ada database `.db` lokal.
+
+Spreadsheet hub default: `1sRiwrn_nLHhp3mb1qyEnC0mxnleLSwF5AbsfuQ0o-LY`.  
+Apps Script opsional (format sheet manual): lihat [docs/APPS_SCRIPT_SETUP.md](docs/APPS_SCRIPT_SETUP.md).
 
 ## Role & URL
 
@@ -48,11 +51,10 @@ Buka `http://localhost:3000`.
 
 Edit `config/categories.json` agar sesuai dengan pilihan kategori pada Google Form. Daftar ini digunakan untuk filter pada tabel transaksi.
 
-## Link Form & Spreadsheet
+## Spreadsheet hub
 
-- **Kas Besar Form:** https://forms.gle/n3kfDNSQ9j18dPKMA
-- **Kas Kecil Form:** https://forms.gle/jN6rXf3oCJK9eyZx7
-- **Spreadsheet:** tersedia melalui tombol di dalam aplikasi setelah login.
+- https://docs.google.com/spreadsheets/d/1sRiwrn_nLHhp3mb1qyEnC0mxnleLSwF5AbsfuQ0o-LY/edit  
+- Tombol **Buka spreadsheet pusat** di CMS setelah login.
 
 ## Keamanan
 

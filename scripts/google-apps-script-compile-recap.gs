@@ -1,15 +1,19 @@
 /**
  * GBC — Compile rekap Kas Kecil + Kas Besar (Bank) ke spreadsheet pusat.
  *
- * SUMBER:
- * - Kas Kecil: 1vQYT4cVRxM8f3qnwWpXupB3SrZbb7Uc7H5ykTXpddiM (gid 423968165)
- * - Kas Besar: 1jgcaW0NLr_FFyVpGa483mMNSqhGBeuxtocRhMj3IyyY (gid 1533749503)
+ * SUMBER (default — tab input di spreadsheet yang sama):
+ * - Tab "KAS KECIL" dan "KAS BESAR" di spreadsheet hub (isi dari web app GBC)
  *
- * TUJUAN:
+ * Legacy (jika USE_LEGACY_FORM_SOURCES = true):
+ * - Kas Kecil / Kas Besar dari spreadsheet Google Form lama
+ *
+ * TUJUAN / HUB:
  * - 1sRiwrn_nLHhp3mb1qyEnC0mxnleLSwF5AbsfuQ0o-LY
  *
- * TAB (urutan):
- * 1. compiled table
+ * TAB (urutan disarankan):
+ * 1. KAS KECIL
+ * 2. KAS BESAR
+ * 3. compiled table
  * 2. ENTITAS CV ANUGRAH
  * 3. ENTITAS BKT
  * 4. ENTITAS MJL
@@ -27,9 +31,13 @@
  */
 
 var COMPILE_CONFIG = {
+  destinationId: "1sRiwrn_nLHhp3mb1qyEnC0mxnleLSwF5AbsfuQ0o-LY",
+  /** false = baca tab KAS KECIL / KAS BESAR di destinationId (disarankan + web app) */
+  useLegacyFormSources: false,
+  kasKecilTab: "KAS KECIL",
+  kasBesarTab: "KAS BESAR",
   kasKecil: { spreadsheetId: "1vQYT4cVRxM8f3qnwWpXupB3SrZbb7Uc7H5ykTXpddiM", gid: 423968165 },
   kasBesar: { spreadsheetId: "1jgcaW0NLr_FFyVpGa483mMNSqhGBeuxtocRhMj3IyyY", gid: 1533749503 },
-  destinationId: "1sRiwrn_nLHhp3mb1qyEnC0mxnleLSwF5AbsfuQ0o-LY",
   logSheetName: "_GBC_Compile_Log"
 };
 
@@ -89,6 +97,8 @@ var ENTITY_TAB_DEFS = [
 ];
 
 var TAB_ORDER = [
+  COMPILE_CONFIG.kasKecilTab,
+  COMPILE_CONFIG.kasBesarTab,
   "compiled table"
 ].concat(ENTITY_TAB_DEFS.map(function (e) { return e.sheetName; })).concat(["LAPORAN BULANAN"]);
 
@@ -163,8 +173,19 @@ function compileAllRecap() {
 }
 
 function loadSourceRows_(jenisKas, cfg) {
-  var ss = SpreadsheetApp.openById(cfg.spreadsheetId);
-  var sh = getSheetByGid_(ss, cfg.gid);
+  var ss;
+  var sh;
+  if (!COMPILE_CONFIG.useLegacyFormSources) {
+    ss = SpreadsheetApp.openById(COMPILE_CONFIG.destinationId);
+    var tabName = jenisKas === "KAS KECIL" ? COMPILE_CONFIG.kasKecilTab : COMPILE_CONFIG.kasBesarTab;
+    sh = ss.getSheetByName(tabName);
+    if (!sh) {
+      throw new Error("Tab tidak ditemukan: " + tabName + " — buat tab atau jalankan web app sekali.");
+    }
+  } else {
+    ss = SpreadsheetApp.openById(cfg.spreadsheetId);
+    sh = getSheetByGid_(ss, cfg.gid);
+  }
   var lastRow = sh.getLastRow();
   var lastCol = sh.getLastColumn();
   if (lastRow < 2 || lastCol < 1) return [];

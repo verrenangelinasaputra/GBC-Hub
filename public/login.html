@@ -15,21 +15,23 @@
       <span class="brand-mark">G</span>
       <div>
         <b>GBC CASH MANAGEMENT</b>
-        <small>Kas Besar &amp; Kas Kecil</small>
+        <small>Bank &amp; Kas Kecil</small>
       </div>
     </div>
     <form class="login-card panel" id="loginForm">
       <h1>Masuk ke sistem</h1>
-      <p>Gunakan username atau email dan password yang telah diberikan administrator.</p>
+      <p>Masuk dengan username/email dan password. Akun baru: <a href="/register">daftar di sini</a>.</p>
       <label for="login">Username / Email</label>
       <input id="login" name="login" type="text" autocomplete="username" required>
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required>
       <button class="btn btn-primary btn-full" type="submit" id="loginSubmit">Masuk</button>
+      <p style="margin:10px 0 0;text-align:center"><a href="/forgot-password">Lupa password?</a></p>
       <div id="loginMessage" class="inline-message" aria-live="polite"></div>
     </form>
     <p class="login-foot">Internal workspace · Session aman dengan cookie HttpOnly</p>
   </div>
+  <script src="/progress.js"></script>
   <script src="/login.js"></script>
 </body>
 </html>

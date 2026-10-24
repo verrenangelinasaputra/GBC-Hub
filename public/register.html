@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172554">
+  <title>Daftar — GBC Cash Management</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="login-body">
+  <div class="login-wrap">
+    <div class="login-brand">
+      <span class="brand-mark">G</span>
+      <div>
+        <b>GBC CASH MANAGEMENT</b>
+        <small>Registrasi akun baru</small>
+      </div>
+    </div>
+    <form class="login-card panel" id="registerForm">
+      <h1>Buat akun</h1>
+      <p>Setelah verifikasi email, admin akan mengaktifkan akses Kas Kecil dan/atau Kas Besar.</p>
+      <label for="name">Nama lengkap</label>
+      <input id="name" name="name" type="text" autocomplete="name" required>
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" autocomplete="email" required>
+      <label for="phone">Nomor telepon</label>
+      <input id="phone" name="phone" type="tel" autocomplete="tel" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+      <label for="confirmPassword">Konfirmasi password</label>
+      <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required>
+      <div id="codeBlock" class="hidden">
+        <label for="code">Kode verifikasi (email)</label>
+        <input id="code" name="code" type="text" inputmode="numeric" maxlength="6" placeholder="6 digit">
+        <button type="button" class="btn btn-soft btn-full hidden" id="resendCodeBtn" disabled>Kirim ulang kode</button>
+        <p class="login-foot" style="margin:8px 0 0;font-size:13px">Tombol kirim ulang aktif setelah 1 menit.</p>
+      </div>
+      <button class="btn btn-primary btn-full" type="submit" id="registerSubmit">Kirim kode verifikasi</button>
+      <div id="registerMessage" class="inline-message" aria-live="polite"></div>
+      <p class="login-foot" style="margin-top:12px"><a href="/login">Sudah punya akun? Masuk</a></p>
+    </form>
+  </div>
+  <script src="/progress.js"></script>
+  <script src="/auth-resend.js"></script>
+  <script src="/register.js"></script>
+</body>
+</html>
