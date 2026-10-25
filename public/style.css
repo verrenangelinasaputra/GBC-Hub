@@ -11,7 +11,7 @@
 .login-card h1{font:800 25px Manrope;margin:0 0 6px}
 .login-card p{margin:0 0 8px;font-size:14px;color:#8792a6;line-height:1.7}
 .login-card label{font-size:13px;font-weight:700;color:#6f7c93}
-.login-card input{width:100%;border:1px solid #dfe5ef;border-radius:8px;padding:11px 12px;background:#fff}
+.login-card input{width:100%;border:1px solid #dfe5ef;border-radius:8px;padding:11px 12px;background:#fff}.remember-row{display:flex;align-items:flex-start;gap:10px;font-size:13px;font-weight:500;color:#6f7c93;cursor:pointer;margin:4px 0 2px}.remember-row input[type=checkbox]{width:auto;margin-top:3px;flex-shrink:0;cursor:pointer}.remember-row strong{font-weight:700;color:#53617a}
 .login-foot{text-align:center;font-size:12px;color:#98a2b5;margin-top:14px}
 a.nav-link{text-decoration:none}
 .kas-layout{display:grid;grid-template-columns:minmax(280px,.95fr) 1.4fr;gap:16px;align-items:start}.kas-layout-single{grid-template-columns:1fr!important}

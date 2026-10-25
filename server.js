@@ -87,6 +87,7 @@ app.use(express.json({ limit: "512kb" }));
 app.use(express.urlencoded({ extended: false }));
 
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 8 * 60 * 60 * 1000);
+const REMEMBER_ME_TTL_MS = Number(process.env.REMEMBER_ME_TTL_MS || 14 * 24 * 60 * 60 * 1000);
 
 function isProductionCookie() {
   return process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
@@ -162,8 +163,9 @@ function safeEqual(a, b) {
 function sign(value) {
   return crypto.createHmac("sha256", SESSION_SECRET).update(value).digest("hex");
 }
-function makeCookie(value) {
-  return `gbc_session=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}` +
+function makeCookie(value, maxAgeMs = SESSION_TTL_MS) {
+  const sec = Math.max(60, Math.floor(Number(maxAgeMs) / 1000));
+  return `gbc_session=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${sec}` +
     (isProductionCookie() ? "; Secure" : "");
 }
 function clearCookie() {
@@ -204,18 +206,25 @@ function getCookie(req, name) {
 function sessionFor(req) {
   return decodeSessionToken(getCookie(req, "gbc_session"));
 }
-function createSession(res, user) {
+function createSession(res, user, options = {}) {
   if (!signingReady()) {
     throw new Error("SESSION_SECRET belum dikonfigurasi.");
   }
+  const rememberMe = !!options.rememberMe;
+  const ttlMs = rememberMe ? REMEMBER_ME_TTL_MS : SESSION_TTL_MS;
   const csrf = crypto.randomBytes(24).toString("hex");
   const token = encodeSessionToken({
     user: publicUser(user),
     csrf,
-    expiresAt: Date.now() + SESSION_TTL_MS
+    expiresAt: Date.now() + ttlMs,
+    rememberMe
   });
-  res.setHeader("Set-Cookie", makeCookie(token));
-  return { csrf, home: permissionsForUser(user)?.home || roleConfig(user.role)?.home || "/login" };
+  res.setHeader("Set-Cookie", makeCookie(token, ttlMs));
+  return {
+    csrf,
+    home: permissionsForUser(user)?.home || roleConfig(user.role)?.home || "/login",
+    sessionExpiresInDays: Math.round(ttlMs / (24 * 60 * 60 * 1000))
+  };
 }
 
 function normalizeEmail(email) {
@@ -527,12 +536,15 @@ app.post("/api/auth/login", async (req, res) => {
     if (!user || !verifyPassword(user, password)) {
       return res.status(401).json({ error: "Kredensial tidak valid." });
     }
-    const sessionInfo = createSession(res, user);
+    const rememberMe = !!req.body?.rememberMe;
+    const sessionInfo = createSession(res, user, { rememberMe });
     res.json({
       ok: true,
       user: publicUser(user),
       csrf: sessionInfo.csrf,
-      redirect: sessionInfo.home
+      redirect: sessionInfo.home,
+      rememberMe,
+      sessionDays: sessionInfo.sessionExpiresInDays
     });
   } catch (e) {
     console.error("login:", e.message);

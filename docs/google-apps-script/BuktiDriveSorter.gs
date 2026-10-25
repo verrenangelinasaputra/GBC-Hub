@@ -65,6 +65,11 @@ function onOpen() {
     .addItem("Pasang trigger jam (inbox)", "installHourlyTrigger")
     .addItem("Hapus trigger jam", "removeHourlyTriggers")
     .addToUi();
+  try {
+    if (typeof onOpenWeeklyRecapMenu === "function") onOpenWeeklyRecapMenu();
+  } catch (e) {
+    /* WeeklyRecapEmail.gs belum dipasang */
+  }
 }
 
 function installHourlyTrigger() {
