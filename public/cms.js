@@ -1238,7 +1238,7 @@ function renderKindDashboard(root, kind) {
     <div class="page-heading"><small>${escapeHtml(label.toUpperCase())}</small><h1>Dashboard</h1>
       <p>Ringkasan pengeluaran ${escapeHtml(label)} dari spreadsheet — kategori, entitas, PIC, sumber dana, dan transaksi terbaru.</p></div>
     <div class="sheet-filter">
-      <div class="sheet-filter-head"><b>Periode recap</b><span>Filter berdasarkan tanggal pengeluaran</span></div>
+      <div class="sheet-filter-head"><b>Periode recap</b><span>Filter tanggal pengeluaran — kosong = semua data (selaras History)</span></div>
       <div class="sheet-filter-grid recap-filter-grid">
         <label class="filter-field"><span>Dari tanggal</span><input type="date" id="recapFrom"></label>
         <label class="filter-field"><span>Sampai tanggal</span><input type="date" id="recapTo"></label>
@@ -1266,9 +1266,8 @@ function renderKindDashboard(root, kind) {
       </tr></thead><tbody id="recapRecent"></tbody></table></div>
     </div>`;
 
-  const now = new Date();
-  $("#recapTo").value = todayIso();
-  $("#recapFrom").value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  $("#recapFrom").value = "";
+  $("#recapTo").value = "";
   root.dataset.kasDashboardKind = kind;
   $("#recapRefresh").addEventListener("click", () => loadKindRecap(kind));
   $("#recapFrom").addEventListener("change", () => loadKindRecap(kind));
