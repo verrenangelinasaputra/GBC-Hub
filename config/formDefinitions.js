@@ -1,12 +1,16 @@
 /** Opsi form Kas Besar (Bank) & Kas Kecil — selaras Google Form GBC. */
 
-const ENTITIES = ["GBC", "Kediri", "CV Anugerah", "MJL", "BKT"];
+const ENTITIES = ["GBC", "Kediri", "CV Anugerah", "CV Lembayung", "MJL", "BKT"];
 
 const EXPENSE_CATEGORIES = [
+  "Bahan Baku Plastik Lokal",
+  "Bayar Hutang Import",
+  "Bayar Hutang Lokal",
   "Beban Alat Tulis Kantor",
   "Beban Bensin, Parkir, Tol Kendaraan",
   "Beban Bongkar Muat",
   "Beban Ekspedisi, Pos & Materai",
+  "Beban Forwarder",
   "Beban Gaji, Upah & Honorer",
   "Beban Gathering Kantor",
   "Beban Iklan",
@@ -28,7 +32,9 @@ const EXPENSE_CATEGORIES = [
   "Beban Telekomunikasi",
   "Beban Tempat Kontainer",
   "Beban Transportasi Karyawan",
-  "Beban Wi-Fi & Internet"
+  "Beban Wi-Fi & Internet",
+  "PIB & Notulen",
+  "Pajak PPh & PPn"
 ];
 
 const SUMBER_DANA_BANK = [
@@ -46,7 +52,8 @@ const SUMBER_DANA_BANK = [
   "Bank Rifki — 110120",
   "Bank Rizky — 110115",
   "Bank Yanti — 110114",
-  "Bank Yulianto — 110107"
+  "Bank Yulianto — 110107",
+  "Bank Virtual (Cust - Supplier)"
 ];
 
 const SUMBER_DANA_KAS_KECIL = [

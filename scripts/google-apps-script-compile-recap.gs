@@ -35,7 +35,8 @@ var COMPILE_CONFIG = {
   /** false = baca tab KAS KECIL / KAS BESAR di destinationId (disarankan + web app) */
   useLegacyFormSources: false,
   kasKecilTab: "KAS KECIL",
-  kasBesarTab: "KAS BESAR",
+  /** Web app GBC menulis ke tab "Bank" (bukan "KAS BESAR"). */
+  kasBesarTab: "Bank",
   kasKecil: { spreadsheetId: "1vQYT4cVRxM8f3qnwWpXupB3SrZbb7Uc7H5ykTXpddiM", gid: 423968165 },
   kasBesar: { spreadsheetId: "1jgcaW0NLr_FFyVpGa483mMNSqhGBeuxtocRhMj3IyyY", gid: 1533749503 },
   logSheetName: "_GBC_Compile_Log"
@@ -64,6 +65,13 @@ var ENTITY_TAB_DEFS = [
     displayName: "CV Anugerah Impian Mandiri",
     match: function (norm) {
       return /anugerah|cv\s*anugerah|^aim$/.test(norm);
+    }
+  },
+  {
+    sheetName: "ENTITAS CV LEMBAYUNG",
+    displayName: "CV Lembayung",
+    match: function (norm) {
+      return /lembayung|cv\s*lembayung/.test(norm);
     }
   },
   {
@@ -135,24 +143,57 @@ var COMPILED_COL = {
   count: COMPILED_HEADERS.length
 };
 
-/** Menu custom saat spreadsheet dibuka (bound script). */
-function onOpen() {
+/** Menu compile — panggil dari onOpen spreadsheet (jangan duplikat onOpen di project lain). */
+function onOpenCompileRecapMenu() {
   SpreadsheetApp.getUi()
     .createMenu("GBC Compile")
     .addItem("Compile semua tab", "compileAllRecap")
+    .addItem("Format tab KAS KECIL + Bank", "formatHubInputTabs")
     .addToUi();
 }
 
+/**
+ * Hanya untuk project yang ISINYA HANYA file compile ini (Extensions → Apps Script di hub, satu Code.gs).
+ * Jika digabung dengan BuktiDriveSorter.gs / WeeklyRecapEmail.gs — HAPUS function onOpen() di bawah
+ * dan panggil onOpenCompileRecapMenu() dari onOpen utama (lihat BuktiDriveSorter.gs).
+ */
+function onOpen() {
+  onOpenCompileRecapMenu();
+}
+
+/** Document lock hanya ada jika script container = spreadsheet; trigger standalone pakai script lock. */
+function acquireHubCompileLock_() {
+  var lock = LockService.getDocumentLock();
+  if (!lock) lock = LockService.getScriptLock();
+  return lock;
+}
+
 function compileAllRecap() {
+  var lock = acquireHubCompileLock_();
+  if (!lock.tryLock(45000)) {
+    throw new Error(
+      "Compile/format lain masih jalan (tunggu ~1 menit). Jangan jalankan formatHubInputTabs bersamaan dengan compile."
+    );
+  }
   var started = new Date();
   try {
     logCompile_("INFO", "Mulai compile", "");
-    var kkRows = loadSourceRows_("KAS KECIL", COMPILE_CONFIG.kasKecil);
-    var kbRows = loadSourceRows_("KAS BESAR", COMPILE_CONFIG.kasBesar);
+    var dest = SpreadsheetApp.openById(COMPILE_CONFIG.destinationId);
+    var kkSh = dest.getSheetByName(COMPILE_CONFIG.kasKecilTab);
+    var kbSh = resolveKasBesarSheet_(dest);
+    if (!kkSh) {
+      throw new Error("Tab tidak ditemukan: " + COMPILE_CONFIG.kasKecilTab);
+    }
+    if (!kbSh) {
+      throw new Error(
+        "Tab Bank/KAS BESAR tidak ditemukan — web app menulis ke tab \"Bank\"."
+      );
+    }
+    var kkRows = loadSourceRowsFromSheet_(kkSh, "KAS KECIL");
+    var kbRows = loadSourceRowsFromSheet_(kbSh, "KAS BESAR");
     var all = kkRows.concat(kbRows);
     all.sort(compareCompiledRows_);
 
-    var dest = SpreadsheetApp.openById(COMPILE_CONFIG.destinationId);
     ensureTabsInOrder_(dest);
 
     writeCompiledTable_(dest.getSheetByName("compiled table"), all);
@@ -162,14 +203,37 @@ function compileAllRecap() {
     });
     writeLaporanBulanan_(dest.getSheetByName("LAPORAN BULANAN"), all);
 
-    var msg = "Selesai: " + all.length + " transaksi (" + kkRows.length + " kecil, " + kbRows.length + " besar).";
-    logCompile_("OK", msg, (new Date() - started) + " ms");
+    var msg =
+      "Selesai: " +
+      all.length +
+      " transaksi (" +
+      kkRows.length +
+      " kecil dari " +
+      kkSh.getName() +
+      ", " +
+      kbRows.length +
+      " bank dari " +
+      kbSh.getName() +
+      ").";
+    logCompile_("OK", msg, new Date() - started + " ms");
     SpreadsheetApp.getActiveSpreadsheet() &&
       SpreadsheetApp.getUi().alert("Compile berhasil\n\n" + msg);
   } catch (err) {
     logCompile_("ERROR", String(err.message || err), err.stack || "");
     throw err;
+  } finally {
+    lock.releaseLock();
   }
+}
+
+/** Tab input bank: "Bank" (web app) atau legacy "KAS BESAR". */
+function resolveKasBesarSheet_(ss) {
+  var names = [COMPILE_CONFIG.kasBesarTab, "Bank", "KAS BESAR"];
+  for (var i = 0; i < names.length; i++) {
+    var sh = ss.getSheetByName(names[i]);
+    if (sh) return sh;
+  }
+  return null;
 }
 
 function loadSourceRows_(jenisKas, cfg) {
@@ -177,15 +241,22 @@ function loadSourceRows_(jenisKas, cfg) {
   var sh;
   if (!COMPILE_CONFIG.useLegacyFormSources) {
     ss = SpreadsheetApp.openById(COMPILE_CONFIG.destinationId);
-    var tabName = jenisKas === "KAS KECIL" ? COMPILE_CONFIG.kasKecilTab : COMPILE_CONFIG.kasBesarTab;
-    sh = ss.getSheetByName(tabName);
+    sh =
+      jenisKas === "KAS KECIL"
+        ? ss.getSheetByName(COMPILE_CONFIG.kasKecilTab)
+        : resolveKasBesarSheet_(ss);
     if (!sh) {
-      throw new Error("Tab tidak ditemukan: " + tabName + " — buat tab atau jalankan web app sekali.");
+      throw new Error("Tab sumber tidak ditemukan untuk " + jenisKas);
     }
+    return loadSourceRowsFromSheet_(sh, jenisKas);
   } else {
     ss = SpreadsheetApp.openById(cfg.spreadsheetId);
     sh = getSheetByGid_(ss, cfg.gid);
   }
+  return loadSourceRowsFromSheet_(sh, jenisKas);
+}
+
+function loadSourceRowsFromSheet_(sh, jenisKas) {
   var lastRow = sh.getLastRow();
   var lastCol = sh.getLastColumn();
   if (lastRow < 2 || lastCol < 1) return [];
@@ -206,7 +277,7 @@ function loadSourceRows_(jenisKas, cfg) {
 
 function rowToRecord_(headers, row, jenisKas, sheetName, rowNumber) {
   var map = headerMap_(headers);
-  var amount = parseMoney_(pick_(row, map, /jumlah uang|jumlah\s*\(rp\)/i));
+  var amount = parseMoney_(pick_(row, map, /jumlah uang|jumlah pengeluaran|jumlah\s*\(rp\)/i));
   if (!amount && amount !== 0) amount = 0;
   var tanggalRaw = pick_(row, map, /tanggal pengeluaran/i);
   var dateIso = normalizeDateIso_(tanggalRaw);
@@ -251,9 +322,18 @@ function recordToCompiledRow_(no, rec) {
   ];
 }
 
+function unmergeUsedArea_(sh, colCount) {
+  var rows = Math.max(sh.getLastRow(), 20);
+  try {
+    sh.getRange(1, 1, rows, colCount).breakApart();
+  } catch (e) {
+    /* ignore */
+  }
+}
+
 function writeCompiledTable_(sh, rows) {
   sh.clear();
-  try { sh.getRange(1, 1, sh.getMaxRows(), COMPILED_COL.count).breakApart(); } catch (e) { /* ignore */ }
+  unmergeUsedArea_(sh, COMPILED_COL.count);
   var headerRow = 4;
   writeReportTitleBlock_(sh, "GBC — REKAP COMPILE (KAS KECIL + KAS BESAR)", rows.length, COMPILED_COL.count);
   setValuesBlock_(sh, headerRow, 1, [COMPILED_HEADERS]);
@@ -273,7 +353,7 @@ function writeCompiledTable_(sh, rows) {
 
 function writeEntityTab_(sh, def, rows) {
   sh.clear();
-  try { sh.getRange(1, 1, sh.getMaxRows(), COMPILED_COL.count).breakApart(); } catch (e) { /* ignore */ }
+  unmergeUsedArea_(sh, COMPILED_COL.count);
   var headerRow = 5;
   writeReportTitleBlock_(
     sh,
@@ -304,7 +384,7 @@ function writeEntityTab_(sh, def, rows) {
 function writeLaporanBulanan_(sh, allRows) {
   sh.clear();
   var colCount = 9;
-  try { sh.getRange(1, 1, sh.getMaxRows(), colCount).breakApart(); } catch (e) { /* ignore */ }
+  unmergeUsedArea_(sh, colCount);
 
   var headers = [
     "Bulan",
@@ -727,6 +807,115 @@ function createTableFilterMonthly_(sh, headerRow, numDataRows, colCount) {
   var existing = sh.getFilter();
   if (existing) existing.remove();
   sh.getRange(headerRow, 1, numDataRows + 1, colCount).createFilter();
+}
+
+/**
+ * Styling tab input (baris 1 = header dari web app). Aman di-run ulang setelah ada transaksi baru.
+ * Web app hanya append values — format tidak ikut otomatis.
+ */
+function formatHubInputTabs() {
+  var lock = acquireHubCompileLock_();
+  if (!lock.tryLock(45000)) {
+    SpreadsheetApp.getActiveSpreadsheet() &&
+      SpreadsheetApp.getUi().alert(
+        "GBC Format Input",
+        "Compile sedang jalan — tunggu selesai lalu coba lagi.",
+        SpreadsheetApp.getUi().ButtonSet.OK
+      );
+    return;
+  }
+  try {
+    formatHubInputTabsCore_();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function formatHubInputTabsCore_() {
+  var ss = SpreadsheetApp.openById(COMPILE_CONFIG.destinationId);
+  var n = 0;
+  var kk = ss.getSheetByName(COMPILE_CONFIG.kasKecilTab);
+  if (formatHubInputTab_(kk)) n++;
+  var bank = resolveKasBesarSheet_(ss);
+  if (formatHubInputTab_(bank)) n++;
+  var msg = n ? "Selesai format " + n + " tab input." : "Tab KAS KECIL / Bank tidak ditemukan.";
+  SpreadsheetApp.getActiveSpreadsheet() && SpreadsheetApp.getUi().alert("GBC Format Input", msg, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function formatHubInputTab_(sh) {
+  if (!sh) return false;
+  var lastCol = Math.max(sh.getLastColumn(), 11);
+  var lastRow = sh.getLastRow();
+  var numData = Math.max(0, lastRow - 1);
+  var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+
+  styleHeaderRow_(sh, 1, lastCol);
+  sh.setFrozenRows(1);
+
+  if (numData >= 1) {
+    var body = sh.getRange(2, 1, numData, lastCol);
+    body.setVerticalAlignment("top").setWrap(true).setFontSize(10);
+    applyBorder_(body, SHEET_THEME.border, false);
+    applyZebra_(sh, 2, numData, lastCol);
+
+    var iJumlah = findInputCol_(headers, /jumlah/i);
+    var iBukti = findInputCol_(headers, /bukti/i);
+    if (iJumlah > 0) {
+      sh.getRange(2, iJumlah, numData, 1).setHorizontalAlignment("right").setNumberFormat("#,##0");
+    }
+    if (iBukti > 0) {
+      applyBuktiLinksOnColumn_(sh, 2, numData, iBukti);
+    }
+    createTableFilterGeneric_(sh, 1, numData, lastCol);
+  }
+
+  setColumnWidthsInput_(sh, lastCol);
+
+  var tabName = String(sh.getName() || "").toUpperCase();
+  if (tabName.indexOf("KECIL") >= 0) {
+    sh.setTabColor(SHEET_THEME.kecilText);
+  } else if (tabName.indexOf("BANK") >= 0 || tabName.indexOf("BESAR") >= 0) {
+    sh.setTabColor(SHEET_THEME.headerBg);
+  }
+  return true;
+}
+
+function findInputCol_(headers, re) {
+  for (var c = 0; c < headers.length; c++) {
+    if (re.test(String(headers[c] || ""))) return c + 1;
+  }
+  return 0;
+}
+
+function applyBuktiLinksOnColumn_(sh, startRow, numRows, col) {
+  for (var i = 0; i < numRows; i++) {
+    var cell = sh.getRange(startRow + i, col);
+    var url = extractBuktiUrl_(cell.getValue());
+    if (!url) continue;
+    try {
+      cell.setRichTextValue(
+        SpreadsheetApp.newRichTextValue().setText("Buka bukti").setLinkUrl(url).build()
+      );
+      cell.setFontColor(SHEET_THEME.headerBg);
+      cell.setFontWeight("bold");
+    } catch (e) {
+      cell.setValue(url);
+    }
+  }
+}
+
+function createTableFilterGeneric_(sh, headerRow, numDataRows, colCount) {
+  if (numDataRows < 1) return;
+  var existing = sh.getFilter();
+  if (existing) existing.remove();
+  sh.getRange(headerRow, 1, numDataRows + 1, colCount).createFilter();
+}
+
+function setColumnWidthsInput_(sh, colCount) {
+  var widths = [118, 108, 120, 140, 180, 100, 200, 140, 120, 130, 100];
+  for (var c = 0; c < colCount; c++) {
+    sh.setColumnWidth(c + 1, widths[c] || 100);
+  }
 }
 
 function setColumnWidthsCompiled_(sh) {

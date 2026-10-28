@@ -33,6 +33,13 @@ const ENTITY_TAB_DEFS = [
     }
   },
   {
+    sheetName: "ENTITAS CV LEMBAYUNG",
+    displayName: "CV Lembayung",
+    match(norm) {
+      return /lembayung|cv\s*lembayung/.test(norm);
+    }
+  },
+  {
     sheetName: "ENTITAS BKT",
     displayName: "PT Bersama Karunia Terang",
     match(norm) {

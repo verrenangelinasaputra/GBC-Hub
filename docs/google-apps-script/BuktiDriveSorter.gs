@@ -70,6 +70,11 @@ function onOpen() {
   } catch (e) {
     /* WeeklyRecapEmail.gs belum dipasang */
   }
+  try {
+    if (typeof onOpenCompileRecapMenu === "function") onOpenCompileRecapMenu();
+  } catch (e) {
+    /* google-apps-script-compile-recap.gs belum dipasang */
+  }
 }
 
 function installHourlyTrigger() {

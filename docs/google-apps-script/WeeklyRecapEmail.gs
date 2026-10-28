@@ -12,17 +12,18 @@ const WEEKLY_RECAP_CONFIG = {
   TAB_BANK: "Bank",
   TAB_KAS_KECIL: "KAS KECIL",
   TIMEZONE: "Asia/Jakarta",
-  /** Minggu 23 = Senin–Minggu; dikirim hari Minggu jam 09:00 WIB */
+  /** Senin–Minggu; dikirim hari Minggu jam 11:00 WIB */
   SEND_WEEKDAY: ScriptApp.WeekDay.SUNDAY,
-  SEND_HOUR: 9,
+  SEND_HOUR: 11,
   SEND_MINUTE: 0,
   /** Pisahkan koma untuk tambah penerima */
-  RECIPIENTS: "verren.angelinas@gmail.com, verren62@gmail.com",
+  RECIPIENTS:
+    "verren.angelinas@gmail.com, verren62@gmail.com, yuliantoffg@gmail.com, ameliaffg@gmail.com",
   /** Opsional: CC/BCC */
   CC: "",
   BCC: "",
   HUB_URL: "https://docs.google.com/spreadsheets/d/1sRiwrn_nLHhp3mb1qyEnC0mxnleLSwF5AbsfuQ0o-LY/edit",
-  APP_URL: "http://localhost:3000",
+  APP_URL: "https://gbchub.vercel.app/",
   MAX_DETAIL_ROWS: 20,
   TOP_CATEGORIES: 5,
   TOP_PIC: 5
@@ -30,11 +31,19 @@ const WEEKLY_RECAP_CONFIG = {
 
 // ——— Menu ———
 
+function weeklyRecapScheduleLabel_() {
+  const c = WEEKLY_RECAP_CONFIG;
+  const mm = ("0" + (c.SEND_MINUTE || 0)).slice(-2);
+  return "Minggu " + c.SEND_HOUR + ":" + mm + " WIB";
+}
+
 function onOpenWeeklyRecapMenu() {
   SpreadsheetApp.getUi()
     .createMenu("GBC Weekly Recap")
     .addItem("Kirim recap minggu ini (test)", "testSendWeeklyRecap")
-    .addItem("Pasang trigger Minggu 09:00", "installWeeklyRecapTrigger")
+    .addItem("Jadwalkan recap sekali (~5 menit)", "installOneTimeRecapTestIn5Min")
+    .addItem("Cek status trigger", "debugWeeklyRecapTriggers")
+    .addItem("Pasang trigger (" + weeklyRecapScheduleLabel_() + ")", "installWeeklyRecapTrigger")
     .addItem("Hapus trigger recap", "removeWeeklyRecapTriggers")
     .addToUi();
 }
@@ -55,7 +64,7 @@ function installWeeklyRecapTrigger() {
     .inTimezone(WEEKLY_RECAP_CONFIG.TIMEZONE)
     .create();
   SpreadsheetApp.getActive()?.toast(
-    "Weekly recap: setiap Minggu ~09:00 WIB → " + parseRecipients_().join(", "),
+    "Weekly recap: setiap " + weeklyRecapScheduleLabel_() + " → " + parseRecipients_().join(", "),
     "GBC Weekly Recap",
     8
   );
@@ -67,10 +76,67 @@ function removeWeeklyRecapTriggers() {
   });
 }
 
+/**
+ * Lewati form trigger manual (sering tolak tanggal ketik). Pasang trigger sekali jalan dari kode.
+ * minutesFromNow: default 5 (Google butuh waktu di masa depan).
+ */
+function installOneTimeRecapTestIn5Min(minutesFromNow) {
+  const tz = WEEKLY_RECAP_CONFIG.TIMEZONE;
+  const mins = Math.max(2, Number(minutesFromNow) || 5);
+  const when = new Date(Date.now() + mins * 60 * 1000);
+  ScriptApp.newTrigger("sendWeeklyRecapEmail")
+    .timeBased()
+    .at(when)
+    .inTimezone(tz)
+    .create();
+  const label = Utilities.formatDate(when, tz, "dd-MM-yyyy HH:mm") + " WIB";
+  Logger.log("One-time sendWeeklyRecapEmail at " + label);
+  SpreadsheetApp.getActive()?.toast("Recap sekali jalan ~" + label, "GBC Weekly Recap", 10);
+}
+
+/**
+ * Jalankan manual jika email tidak jalan: lihat apakah trigger ada & jam di CONFIG vs terpasang.
+ * Catatan: mengubah SEND_HOUR/SEND_MINUTE di CONFIG tidak mengubah trigger lama — pasang ulang.
+ */
+function debugWeeklyRecapTriggers() {
+  const ui = SpreadsheetApp.getUi();
+  const cfgLabel = weeklyRecapScheduleLabel_();
+  const triggers = ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === "sendWeeklyRecapEmail");
+  const lines = [
+    "CONFIG saat ini: " + cfgLabel + " · " + parseRecipients_().join(", "),
+    "Trigger terpasang: " + triggers.length
+  ];
+  triggers.forEach((t, i) => {
+    lines.push(
+      "#" +
+        (i + 1) +
+        " id=" +
+        t.getUniqueId() +
+        " · tipe=" +
+        t.getEventType() +
+        " · sumber=" +
+        (t.getTriggerSource() || "—")
+    );
+  });
+  if (!triggers.length) {
+    lines.push("");
+    lines.push("Belum ada trigger → menu Pasang trigger, atau run installWeeklyRecapTrigger().");
+  } else {
+    lines.push("");
+    lines.push(
+      "Google bisa telat 15–30+ menit. Setelah ubah jam di CONFIG, wajib pasang ulang trigger."
+    );
+    lines.push("Cek tab Eksekusi untuk sendWeeklyRecapEmail hari ini (Completed / Failed).");
+  }
+  const msg = lines.join("\n");
+  Logger.log(msg);
+  ui.alert("GBC Weekly Recap — trigger", msg, ui.ButtonSet.OK);
+}
+
 // ——— Entry ———
 
 /**
- * Dipanggil trigger Minggu 08:40. Manual test: testSendWeeklyRecap().
+ * Dipanggil trigger Minggu 11:00 WIB. Manual test: testSendWeeklyRecap().
  */
 function sendWeeklyRecapEmail() {
   sendWeeklyRecapCore_({ respectSchedule: true });
@@ -107,14 +173,28 @@ function sendWeeklyRecapCore_(options) {
     formatRp_(summary.combined.total);
   const html = buildWeeklyRecapHtml_(range, prevRange, summary, inWeek);
   const recipients = parseRecipients_();
-  if (!recipients.length) throw new Error("RECIPIENTS kosong di WEEKLY_RECAP_CONFIG.");
+  if (!recipients.length) {
+    throw new Error(
+      "Tidak ada email valid di RECIPIENTS. Cek typo (jangan @ameliaffg@gmail.com — cukup ameliaffg@gmail.com)."
+    );
+  }
 
-  GmailApp.sendEmail(recipients.join(","), subject, stripHtml_(html), {
-    htmlBody: html,
-    name: "GBC Cash Management",
-    cc: WEEKLY_RECAP_CONFIG.CC || undefined,
-    bcc: WEEKLY_RECAP_CONFIG.BCC || undefined
-  });
+  try {
+    GmailApp.sendEmail(recipients.join(","), subject, stripHtml_(html), {
+      htmlBody: html,
+      name: "GBC Cash Management",
+      cc: normalizeRecipientList_(WEEKLY_RECAP_CONFIG.CC).join(",") || undefined,
+      bcc: normalizeRecipientList_(WEEKLY_RECAP_CONFIG.BCC).join(",") || undefined
+    });
+  } catch (e) {
+    const msg = String(e.message || e);
+    Logger.log("GmailApp.sendEmail gagal: " + msg);
+    throw new Error(
+      "Gmail gagal kirim: " +
+        msg +
+        " · Cek RECIPIENTS, kuota Gmail, dan izin script (authorize ulang)."
+    );
+  }
 
   Logger.log("Weekly recap terkirim ke " + recipients.join(", ") + " (" + inWeek.length + " transaksi).");
 }
@@ -508,11 +588,34 @@ function metricCell_(label, value, sub) {
 
 // ——— Utils ———
 
-function parseRecipients_() {
-  return String(WEEKLY_RECAP_CONFIG.RECIPIENTS || "")
+function normalizeEmailToken_(raw) {
+  let s = String(raw || "").trim();
+  while (s.charAt(0) === "@") s = s.slice(1).trim();
+  return s.toLowerCase();
+}
+
+function isValidEmail_(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || ""));
+}
+
+/** Pecah RECIPIENTS/CC/BCC; buang alamat invalid; log typo ke Logger. */
+function normalizeRecipientList_(raw) {
+  const valid = [];
+  const invalid = [];
+  String(raw || "")
     .split(/[,;]+/)
-    .map(s => s.trim())
-    .filter(Boolean);
+    .map(normalizeEmailToken_)
+    .forEach(s => {
+      if (!s) return;
+      if (isValidEmail_(s)) valid.push(s);
+      else invalid.push(s);
+    });
+  if (invalid.length) Logger.log("Email invalid (dilewati): " + invalid.join(", "));
+  return valid;
+}
+
+function parseRecipients_() {
+  return normalizeRecipientList_(WEEKLY_RECAP_CONFIG.RECIPIENTS);
 }
 
 function parseDateIso_(raw) {

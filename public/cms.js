@@ -370,7 +370,7 @@ function renderOwnerBusinessUnits(root) {
     <div class="page-heading">
       <small>OWNER · BUSINESS UNIT</small>
       <h1>Business Unit</h1>
-      <p>Lima entitas operasional — buka folder bukti pengeluaran di Google Drive atau data rekap (segera).</p>
+      <p>Enam entitas operasional — buka folder bukti pengeluaran di Google Drive atau data rekap (segera).</p>
     </div>
     <div class="entity-grid bu-unit-grid" id="buUnitGrid"></div>`;
 

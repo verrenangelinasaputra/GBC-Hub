@@ -17,7 +17,8 @@ Apps Script **tidak wajib**. Gunakan hanya jika Anda ingin:
 2. **Extensions → Apps Script**
 
 3. Hapus isi default `Code.gs`, lalu **salin seluruh isi** file repo:  
-   `scripts/google-apps-script-compile-recap.gs`
+   `scripts/google-apps-script-compile-recap.gs`  
+   **Penting:** jangan tempel ke project yang sudah punya `BuktiDriveSorter.gs` / `WeeklyRecapEmail.gs` **tanpa** menghapus `function onOpen()` duplikat di compile — atau gabungkan file compile **tanpa** blok `function onOpen()` di bawah (menu dipanggil dari `onOpen` di BuktiDriveSorter).
 
 4. **Save** project (nama bebas, mis. `GBC Compile Recap`)
 
@@ -44,6 +45,8 @@ Apps Script **tidak wajib**. Gunakan hanya jika Anda ingin:
 | **LAPORAN BULANAN** | Ringkasan per bulan & entitas |
 
 Tab input bisa **dibuat otomatis** saat pertama kali simpan dari web (service account **Editor**). Header baris 1 dibuat otomatis jika kosong.
+
+**Styling tab KAS KECIL / Bank:** web app tidak mengatur warna. Sekali jalan (atau setelah banyak data baru): menu **GBC Compile → Format tab KAS KECIL + Bank**, atau run `formatHubInputTabs` di Apps Script (butuh file `google-apps-script-compile-recap.gs` terpasang).
 
 ---
 
