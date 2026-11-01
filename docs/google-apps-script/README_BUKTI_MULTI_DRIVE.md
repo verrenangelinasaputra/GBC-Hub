@@ -32,7 +32,7 @@ Entitas & jenis (Bank / Kas Kecil) dikenali dari **path folder** (`bukti pengelu
 | **MJL** | [1LxJer5eBJ8YXDqwurZBsVfEjgju6y3Fe](https://drive.google.com/drive/u/1/folders/1LxJer5eBJ8YXDqwurZBsVfEjgju6y3Fe) | `BUKTI PENGELUARAN MJL` → `Bank` / `Kas Kecil` |
 | **BKT** | [1ztj4N_ldNG1j857Al0GOy203NHHGO90p](https://drive.google.com/drive/u/2/folders/1ztj4N_ldNG1j857Al0GOy203NHHGO90p) | `BUKTI PENGELUARAN BKT` → `Bank` / `Kas Kecil` |
 | **CV Lembayung** (LIGHT) | [1NIxnDIW8J_Twv3VmGjgvJwOoh6U8FTbp](https://drive.google.com/drive/folders/1NIxnDIW8J_Twv3VmGjgvJwOoh6U8FTbp) | `BUKTI PENGELUARAN CV LEMBAYUNG` → `Bank` / `Kas Kecil` |
-| **CV Anugerah** | *(belum)* | Isi variabel `CV_ANUGERAH_DRIVE_ROOT_ID` di script |
+| **CV Anugerah** | [1e9ZC8iYcAfG43cG9V1Rmmv-5rUutO5Yk](https://drive.google.com/drive/folders/1e9ZC8iYcAfG43cG9V1Rmmv-5rUutO5Yk) | `BUKTI PENGELUARAN CV ANUGRAH` → `Bank` / `Kas Kecil` |
 
 Form **Kas Besar** → subfolder **Bank**. Form **Kas Kecil** → subfolder **Kas Kecil**.
 
@@ -47,7 +47,7 @@ Shared arsip tetap bisa memakai folder **`KAS BESAR` / `KAS KECIL`** + **`MM - B
 3. Tempel isi `BuktiMultiDrive.gs`.
 4. Tab **Project Settings** → aktifkan manifest → paste `appsscript.json` dari repo. Wajib scope **`spreadsheets`** (bukan hanya `spreadsheets.currentonly`) karena debug & log memakai `SpreadsheetApp.openById`.
 5. Sesuaikan di bagian atas script jika perlu:
-   - `CV_ANUGERAH_DRIVE_ROOT_ID = "..."` (nanti)
+   - `CV_ANUGERAH_DRIVE_ROOT_ID = "1e9ZC8iYcAfG43cG9V1Rmmv-5rUutO5Yk"`
    - ID folder jika berubah
 
 ### 2. Izin Google
@@ -102,7 +102,7 @@ function onOpen() {
 | Gejala | Solusi |
 |--------|--------|
 | `openById` / izin `spreadsheets` tidak cukup | Ganti `spreadsheets.currentonly` → `https://www.googleapis.com/auth/spreadsheets` di `appsscript.json`, hapus izin app lama, authorize ulang |
-| CV Anugerah tidak tersalin | Isi `CV_ANUGERAH_DRIVE_ROOT_ID` |
+| CV Anugerah tidak tersalin | Pastikan `CV_ANUGERAH_DRIVE_ROOT_ID` di project Apps Script (bukan hanya di repo) berisi `1e9ZC8iYcAfG43cG9V1Rmmv-5rUutO5Yk`, lalu jalankan menu salin lagi |
 | Access denied | Share folder ke akun yang menjalankan script |
 | File shared tidak ke entitas | Pastikan path shared punya folder entitas + Kas Kecil/Bank (atau KAS KECIL/KAS BESAR); cek Execution log |
 | Duplikat banyak | Normal jika nama file beda; tracking per **file ID** sumber |

@@ -4,7 +4,7 @@ Fitur ini menambah:
 
 - **Daftar** (`/register`) → kode verifikasi ke email → baris user di Google Sheet
 - **Lupa password** (`/forgot-password`) → kode ke email → password baru
-- **Admin → User Access** → per modul: **Lihat** (History + Dashboard) dan **Isi form** (input transaksi)
+- **Admin → User Access** → per modul: **Lihat** (History + Dashboard) dan **Isi form** (input transaksi), plus **entitas** dan **sumber dana** terpisah untuk Kas Kecil vs Bank (daftar dari `config/formDefinitions.js`)
 - User baru login pertama kali → halaman **Selamat datang** (menu kosong) sampai admin memberi akses
 
 Akun **admin / superadmin / owner** dari `.env` tidak berubah (bukan sheet).
@@ -25,7 +25,7 @@ Tab dibuat otomatis saat pertama kali dipakai:
 
 | Tab | Isi |
 |-----|-----|
-| **Users** | … `access_kas_kecil`, `access_kas_besar`, `input_kas_kecil`, `input_kas_besar`, `created_at`, `updated_at` |
+| **Users** | … `access_kas_*`, `input_kas_*`, `entities_kas_kecil`, `sumber_dana_kas_kecil`, `entities_kas_besar`, `sumber_dana_kas_besar` (pipe-separated), `created_at`, `updated_at` |
 | **AuthCodes** | Kode verifikasi sementara (register / reset password) |
 
 Env opsional:

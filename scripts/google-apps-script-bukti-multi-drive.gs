@@ -46,8 +46,8 @@ var MULTI_DRIVE_CONFIG = {
   LOG_SHEET_NAME: "_GBC_MultiDrive_Log"
 };
 
-/** Isi saat folder CV Anugerah sudah siap (kosong = lewati salinan ke drive Anugerah) */
-var CV_ANUGERAH_DRIVE_ROOT_ID = "";
+/** Folder Drive CV Anugerah: https://drive.google.com/drive/folders/1e9ZC8iYcAfG43cG9V1Rmmv-5rUutO5Yk */
+var CV_ANUGERAH_DRIVE_ROOT_ID = "1e9ZC8iYcAfG43cG9V1Rmmv-5rUutO5Yk";
 
 var RESPONSE_SHEET_KAS_KECIL_ID = "1vQYT4cVRxM8f3qnwWpXupB3SrZbb7Uc7H5ykTXpddiM";
 var RESPONSE_SHEET_KAS_KECIL_GID = 423968165;

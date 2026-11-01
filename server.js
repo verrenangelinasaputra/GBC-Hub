@@ -48,6 +48,13 @@ const { compileAllRecap } = require("./lib/compileRecap");
 const { ENTITIES } = require("./config/hubForm");
 const { formOptionsForKind } = require("./config/formDefinitions");
 const {
+  filterFormOptionsForUser,
+  validateMemberScopeForSubmit,
+  memberEntities,
+  accessCatalogForAdmin,
+  isUnrestrictedRole
+} = require("./lib/memberAccess");
+const {
   uploadBuktiFiles,
   inspectUploadFolder,
   peekUploadFolderCache,
@@ -447,8 +454,8 @@ app.get("/api/me", async (req, res) => {
     categories,
     entities: ENTITIES,
     formOptions: {
-      kas_besar: formOptionsForKind("kas_besar"),
-      kas_kecil: formOptionsForKind("kas_kecil")
+      kas_besar: filterFormOptionsForUser(user, "kas_besar"),
+      kas_kecil: filterFormOptionsForUser(user, "kas_kecil")
     },
     driveUpload,
     driveUploadReady: driveUpload.ready,
@@ -723,7 +730,7 @@ app.post("/api/auth/forgot-password/reset", async (req, res) => {
 app.get("/api/admin/users", requireAuth, requireRoles("admin", "super_admin"), async (req, res) => {
   try {
     const users = await listMembersForAdmin();
-    res.json({ ok: true, users, registryUrl: registrySpreadsheetUrl() });
+    res.json({ ok: true, users, catalog: accessCatalogForAdmin(), registryUrl: registrySpreadsheetUrl() });
   } catch (e) {
     console.error("admin users:", e.message);
     res.status(e.status || 500).json({ error: e.message || "Gagal memuat daftar user." });
@@ -750,7 +757,11 @@ app.patch("/api/admin/users/:userId/access", requireAuth, requireCsrf, requireRo
       access_kas_kecil: !!req.body?.access_kas_kecil,
       access_kas_besar: !!req.body?.access_kas_besar,
       input_kas_kecil: !!req.body?.input_kas_kecil,
-      input_kas_besar: !!req.body?.input_kas_besar
+      input_kas_besar: !!req.body?.input_kas_besar,
+      entities_kas_kecil: req.body?.entities_kas_kecil,
+      sumber_dana_kas_kecil: req.body?.sumber_dana_kas_kecil,
+      entities_kas_besar: req.body?.entities_kas_besar,
+      sumber_dana_kas_besar: req.body?.sumber_dana_kas_besar
     });
     if (access?.email) invalidateMemberFreshCache(access.email);
     res.json({ ok: true, message: "Akses user diperbarui.", access });
@@ -765,12 +776,22 @@ app.post("/api/auth/logout", requireAuth, requireCsrf, (req, res) => {
   res.json({ ok: true });
 });
 
+function entityScopeForRequest(req, kind) {
+  const user = req.user;
+  if (!user || isUnrestrictedRole(user)) return null;
+  const allowed = memberEntities(user, kind);
+  return allowed.length ? allowed : [];
+}
+
 async function sheetList(kind, req) {
   const categories = loadCategories();
   const allowed = kind === "kas_besar" ? categories.kasBesar : categories.kasKecil;
   const force = req.query.refresh === "1" || req.query.refresh === "true";
   const parsed = await fetchRows(kind, { force });
-  return listFromSheet(parsed, { ...req.query, strictCategory: false }, allowed);
+  const scope = entityScopeForRequest(req, kind);
+  const filters = { ...req.query, strictCategory: false };
+  if (scope) filters.allowedEntities = scope;
+  return listFromSheet(parsed, filters, allowed);
 }
 
 app.get("/api/kas-besar/transactions", requireAuth, attachFreshMember, requireKasBesarRead, async (req, res) => {
@@ -793,7 +814,7 @@ app.get("/api/kas-kecil/transactions", requireAuth, attachFreshMember, requireKa
 
 app.get("/api/form-options/:kind", requireAuth, (req, res) => {
   const kind = req.params.kind === "kas-besar" ? "kas_besar" : "kas_kecil";
-  res.json(formOptionsForKind(kind));
+  res.json(filterFormOptionsForUser(req.user, kind));
 });
 
 function picFromSessionUser(user) {
@@ -809,6 +830,10 @@ async function submitTransaction(req, res, kind) {
   const validationError = validateTransactionPayload(payload, kind, files, driveUpload.ready);
   if (validationError) {
     return res.status(400).json({ error: validationError });
+  }
+  const scopeError = validateMemberScopeForSubmit(req.user, kind, payload);
+  if (scopeError) {
+    return res.status(403).json({ error: scopeError });
   }
   try {
     if (files.length) {
@@ -883,9 +908,11 @@ app.get("/api/super-admin/recap", requireAuth, requireRoles("super_admin"), asyn
 
 app.get("/api/kas-kecil/recap", requireAuth, attachFreshMember, requireKasKecilRead, async (req, res) => {
   try {
+    const scope = entityScopeForRequest(req, "kas_kecil");
     const summary = await kasKecilRecap({
       dateFrom: req.query.dateFrom,
-      dateTo: req.query.dateTo
+      dateTo: req.query.dateTo,
+      allowedEntities: scope || undefined
     });
     res.json(summary);
   } catch (e) {
@@ -896,9 +923,11 @@ app.get("/api/kas-kecil/recap", requireAuth, attachFreshMember, requireKasKecilR
 
 app.get("/api/kas-besar/recap", requireAuth, attachFreshMember, requireKasBesarRead, async (req, res) => {
   try {
+    const scope = entityScopeForRequest(req, "kas_besar");
     const summary = await kasBesarRecap({
       dateFrom: req.query.dateFrom,
-      dateTo: req.query.dateTo
+      dateTo: req.query.dateTo,
+      allowedEntities: scope || undefined
     });
     res.json(summary);
   } catch (e) {

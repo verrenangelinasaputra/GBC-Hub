@@ -1436,10 +1436,43 @@ function renderMemberWelcome(root) {
     <article class="panel"><p>Refresh halaman ini setelah admin memberi akses. Menu akan muncul di sidebar.</p></article>`;
 }
 
+function scopeCheckGroup(groupName, options, selected) {
+  const sel = new Set(selected || []);
+  const boxes = (options || [])
+    .map(
+      v =>
+        `<label class="scope-check"><input type="checkbox" value="${escapeHtml(v)}"${
+          sel.has(v) ? " checked" : ""
+        } /> ${escapeHtml(v)}</label>`
+    )
+    .join("");
+  return `<div class="scope-check-group" data-scope-group="${groupName}">${boxes}</div>`;
+}
+
+function readScopeGroup(root, groupName) {
+  const el = root.querySelector(`[data-scope-group="${groupName}"]`);
+  if (!el) return [];
+  return [...el.querySelectorAll('input[type="checkbox"]:checked')].map(i => i.value);
+}
+
+function renderUserScopePanel(title, prefix, catalog, user) {
+  const entities = catalog.entities || [];
+  const sumberKey = prefix === "kk" ? "sumber_dana_kas_kecil" : "sumber_dana_kas_besar";
+  const entityKey = prefix === "kk" ? "entities_kas_kecil" : "entities_kas_besar";
+  const sumberList = catalog[sumberKey] || [];
+  return `<section class="user-scope-panel" data-scope-panel="${prefix}">
+    <h4>${escapeHtml(title)}</h4>
+    <p class="scope-label">Entitas <span class="req">*</span> (wajib jika Lihat / Isi form)</p>
+    ${scopeCheckGroup(`${prefix}-entities`, entities, user[entityKey])}
+    <p class="scope-label">Sumber dana <span class="req">*</span> (wajib jika Isi form)</p>
+    ${scopeCheckGroup(`${prefix}-sumber`, sumberList, user[sumberKey])}
+  </section>`;
+}
+
 async function renderUserAccess(root) {
   root.innerHTML = `
     <div class="page-heading"><small>ADMIN</small><h1>User Access</h1>
-      <p>Kelola akses user: <strong>Lihat</strong> = History + Dashboard · <strong>Isi form</strong> = bisa input transaksi (otomatis dapat lihat).</p>
+      <p><strong>Lihat</strong> = History + Dashboard (wajib pilih minimal 1 entitas). <strong>Isi form</strong> = input transaksi (wajib entitas + sumber dana untuk modul itu). Kas Kecil dan Bank diatur terpisah.</p>
     </div>
     <article class="panel">
       <div id="userAccessMsg" class="inline-message" aria-live="polite"></div>
@@ -1454,6 +1487,11 @@ async function renderUserAccess(root) {
   const body = $("#userAccessBody");
   try {
     const data = await api("/api/admin/users");
+    const catalog = {
+      entities: data.catalog?.entities || state.entities || [],
+      sumber_dana_kas_kecil: data.catalog?.sumber_dana_kas_kecil || state.formOptions?.kas_kecil?.sumberDana || [],
+      sumber_dana_kas_besar: data.catalog?.sumber_dana_kas_besar || state.formOptions?.kas_besar?.sumberDana || []
+    };
     if (data.registryUrl) {
       $("#userAccessLink").innerHTML = `<a href="${escapeHtml(data.registryUrl)}" target="_blank" rel="noopener">Buka spreadsheet registry ↗</a>`;
     }
@@ -1464,6 +1502,7 @@ async function renderUserAccess(root) {
     }
     for (const u of data.users) {
       const tr = document.createElement("tr");
+      tr.className = "user-access-row";
       tr.innerHTML = `
         <td>${escapeHtml(u.name)}</td>
         <td>${escapeHtml(u.email)}</td>
@@ -1473,28 +1512,47 @@ async function renderUserAccess(root) {
         <td><input type="checkbox" data-field="access_kas_besar" ${u.access_kas_besar ? "checked" : ""} title="History & Dashboard"></td>
         <td><input type="checkbox" data-field="input_kas_besar" ${u.input_kas_besar ? "checked" : ""} title="Form input"></td>
         <td class="user-access-actions">
+          <button type="button" class="btn btn-ghost btn-sm" data-toggle-scope>Entitas &amp; sumber</button>
           <button type="button" class="btn btn-primary btn-sm" data-save>Simpan</button>
           <button type="button" class="btn btn-danger btn-sm" data-delete>Hapus</button>
         </td>`;
+      const scopeTr = document.createElement("tr");
+      scopeTr.className = "user-access-scopes hidden";
+      scopeTr.innerHTML = `<td colspan="8"><div class="user-scope-grid">
+        ${renderUserScopePanel("Kas Kecil", "kk", catalog, u)}
+        ${renderUserScopePanel("Bank", "kb", catalog, u)}
+      </div></td>`;
+
+      tr.dataset.userBlock = "1";
+      scopeTr.dataset.userBlock = "1";
+
       const inputKk = tr.querySelector('[data-field="input_kas_kecil"]');
       const inputKb = tr.querySelector('[data-field="input_kas_besar"]');
       const viewKk = tr.querySelector('[data-field="access_kas_kecil"]');
       const viewKb = tr.querySelector('[data-field="access_kas_besar"]');
-      inputKk.addEventListener("change", () => { if (inputKk.checked) viewKk.checked = true; });
-      inputKb.addEventListener("change", () => { if (inputKb.checked) viewKb.checked = true; });
+      inputKk.addEventListener("change", () => {
+        if (inputKk.checked) viewKk.checked = true;
+      });
+      inputKb.addEventListener("change", () => {
+        if (inputKb.checked) viewKb.checked = true;
+      });
+      tr.querySelector("[data-toggle-scope]").addEventListener("click", () => {
+        scopeTr.classList.toggle("hidden");
+      });
       tr.querySelector("[data-delete]").addEventListener("click", async () => {
         const label = `${u.name} (${u.email})`;
         if (!window.confirm(`Hapus akun ${label}? Tindakan ini tidak bisa dibatalkan.`)) return;
         try {
           msg.textContent = "";
           msg.className = "inline-message";
-          const data = await api(`/api/admin/users/${encodeURIComponent(u.user_id)}`, {
+          const del = await api(`/api/admin/users/${encodeURIComponent(u.user_id)}`, {
             method: "DELETE",
             progressLabel: "Menghapus akun…"
           });
           tr.remove();
-          toast(data.message || "Akun dihapus.");
-          if (!body.querySelector("tr")) {
+          scopeTr.remove();
+          toast(del.message || "Akun dihapus.");
+          if (!body.querySelector('[data-user-block="1"]')) {
             body.innerHTML = '<tr><td colspan="8">Belum ada user terdaftar.</td></tr>';
           }
         } catch (e) {
@@ -1507,31 +1565,36 @@ async function renderUserAccess(root) {
         const input_kas_kecil = inputKk.checked;
         const access_kas_besar = viewKb.checked;
         const input_kas_besar = inputKb.checked;
+        const scopeRoot = scopeTr;
         try {
           msg.textContent = "";
           msg.className = "inline-message";
-          const data = await api(`/api/admin/users/${encodeURIComponent(u.user_id)}/access`, {
+          const savedResp = await api(`/api/admin/users/${encodeURIComponent(u.user_id)}/access`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               access_kas_kecil,
               access_kas_besar,
               input_kas_kecil,
-              input_kas_besar
+              input_kas_besar,
+              entities_kas_kecil: readScopeGroup(scopeRoot, "kk-entities"),
+              sumber_dana_kas_kecil: readScopeGroup(scopeRoot, "kk-sumber"),
+              entities_kas_besar: readScopeGroup(scopeRoot, "kb-entities"),
+              sumber_dana_kas_besar: readScopeGroup(scopeRoot, "kb-sumber")
             })
           });
-          const saved = data.access || {};
+          const saved = savedResp.access || {};
           viewKk.checked = !!saved.access_kas_kecil;
           inputKk.checked = !!saved.input_kas_kecil;
           viewKb.checked = !!saved.access_kas_besar;
           inputKb.checked = !!saved.input_kas_besar;
-          toast(data.message || "Akses disimpan.");
+          toast(savedResp.message || "Akses disimpan.");
         } catch (e) {
           msg.textContent = e.message;
           msg.className = "inline-message error";
         }
       });
-      body.append(tr);
+      body.append(tr, scopeTr);
     }
   } catch (e) {
     body.innerHTML = `<tr><td colspan="8">${escapeHtml(e.message)}</td></tr>`;
