@@ -144,8 +144,12 @@ function onOpenMultiDriveBuktiMenu() {
   SpreadsheetApp.getUi()
     .createMenu("GBC Multi Drive Bukti")
     .addItem("Salin compiled → drive entitas (semua file)", "distributeAllFromCompiledBukti")
+    .addItem("Perbarui link bukti hub → drive entitas", "syncAllHubBuktiLinksToEntityMenu")
     .addItem("Salin shared lama → drive entitas", "distributeAllFromSharedArchive")
     .addItem("Salin inbox (hanya file di root) → shared + entitas", "copyAllFromFormInbox")
+    .addSeparator()
+    .addItem("Hub: bukti baris terakhir (Kas Kecil)", "runHubMultiDriveLastRowKasKecil")
+    .addItem("Hub: bukti baris terakhir (Bank)", "runHubMultiDriveLastRowKasBesar")
     .addSeparator()
     .addItem("Debug: baris terakhir Kas Kecil", "debugMultiDriveLastRowKecil")
     .addItem("Debug: baris terakhir Kas Besar", "debugMultiDriveLastRowBesar")
@@ -236,6 +240,7 @@ function handleMultiDriveSubmit_(e, kasType) {
   var jenisLabel = jenisFolderLabel_(kasType);
   var archiveKasFolderName = archiveKasFolderName_(kasType);
   var copied = 0;
+  var entityFileUrls = [];
 
   payload.fileIds.forEach(function (sourceId, index) {
     try {
@@ -260,9 +265,14 @@ function handleMultiDriveSubmit_(e, kasType) {
       if (entityRootId) {
         var entityFolder = resolveEntityDriveFolder_(entityRoute, jenisLabel, entityRootId);
         var entityName = uniqueNameInFolder_(entityFolder, fileName);
-        if (!wasCopiedBefore_(sourceId, entityRootId, entityFolder.getId())) {
+        var entityCopyId = getMarkedCopyId_(sourceId, entityRootId, entityFolder.getId());
+        if (!entityCopyId && !wasCopiedBefore_(sourceId, entityRootId, entityFolder.getId())) {
           var entityCopy = source.makeCopy(entityName, entityFolder);
-          markCopyDone_(sourceId, entityRootId, entityFolder.getId(), entityCopy.getId());
+          entityCopyId = entityCopy.getId();
+          markCopyDone_(sourceId, entityRootId, entityFolder.getId(), entityCopyId);
+        }
+        if (entityCopyId) {
+          entityFileUrls.push("https://drive.google.com/file/d/" + entityCopyId + "/view");
         }
       }
       copied++;
@@ -271,18 +281,9 @@ function handleMultiDriveSubmit_(e, kasType) {
     }
   });
 
-  if (copied > 0 && e.range) {
+  if (entityFileUrls.length && e.range) {
     try {
-      var firstId = payload.fileIds[0];
-      var displayName = buildBuktiFileName_(
-        payload.tanggalRaw,
-        payload.entity,
-        payload.namaTransaksi,
-        payload.amountRaw,
-        DriveApp.getFileById(firstId),
-        kasType
-      );
-      updateBuktiCellInSheet_(e, firstId, displayName);
+      updateBuktiCellInSheet_(e, entityFileUrls.join("\n"), payload.namaTransaksi || "");
     } catch (ignore) {}
   }
 
@@ -317,7 +318,21 @@ function distributeFromArchiveRoot_(folderId, label) {
   var root = DriveApp.getFolderById(folderId);
   var stats = { ok: 0, skip: 0, fail: 0, errors: [] };
   walkArchiveTreeForEntityCopy_(root, [], stats);
-  var msg = label + "→entitas: OK=" + stats.ok + " skip=" + stats.skip + " fail=" + stats.fail;
+  var hubUpdated = 0;
+  try {
+    hubUpdated = syncAllHubBuktiLinksToEntity_();
+  } catch (syncErr) {
+    Logger.log("sync hub bukti: " + syncErr);
+  }
+  var msg =
+    label +
+    "→entitas: OK=" +
+    stats.ok +
+    " skip=" +
+    stats.skip +
+    " fail=" +
+    stats.fail +
+    (hubUpdated ? " | hub link diperbarui=" + hubUpdated : "");
   Logger.log(msg);
   if (stats.errors.length) Logger.log(stats.errors.join("\n"));
   toastMultiDrive_(msg, "GBC Multi Drive", 8);
@@ -358,15 +373,24 @@ function distributeOneSharedFile_(file, pathNames, stats) {
   }
   var entityFolder = resolveEntityDriveFolder_(route, parsed.jenisLabel, rootId);
   var sourceId = file.getId();
+  var entityCopyId = getMarkedCopyId_(sourceId, rootId, entityFolder.getId());
   if (wasCopiedBefore_(sourceId, rootId, entityFolder.getId())) {
     stats.skip++;
     Logger.log("SKIP (sudah pernah disalin): " + file.getName());
-    return;
+  } else {
+    var destName = uniqueNameInFolder_(entityFolder, file.getName());
+    var copy = file.makeCopy(destName, entityFolder);
+    entityCopyId = copy.getId();
+    markCopyDone_(sourceId, rootId, entityFolder.getId(), entityCopyId);
+    stats.ok++;
   }
-  var destName = uniqueNameInFolder_(entityFolder, file.getName());
-  var copy = file.makeCopy(destName, entityFolder);
-  markCopyDone_(sourceId, rootId, entityFolder.getId(), copy.getId());
-  stats.ok++;
+  if (entityCopyId) {
+    try {
+      updateHubRowsForCompiledFile_(sourceId, entityCopyId, parsed.entityLabel, parsed.jenisLabel);
+    } catch (hubErr) {
+      Logger.log("update hub bukti: " + hubErr);
+    }
+  }
 }
 
 function normalizeEntityLabel_(raw) {
@@ -1002,9 +1026,8 @@ function pushFileIds_(fileIds, val) {
     val.forEach(function (v) { pushFileIds_(fileIds, v); });
     return;
   }
-  String(val).split(/,\s*/).forEach(function (part) {
-    var id = extractDriveFileId_(part);
-    if (id && fileIds.indexOf(id) === -1) fileIds.push(id);
+  extractAllDriveFileIdsFromText_(val).forEach(function (id) {
+    if (fileIds.indexOf(id) === -1) fileIds.push(id);
   });
 }
 
@@ -1020,19 +1043,158 @@ function extractDriveFileId_(s) {
   return null;
 }
 
-function updateBuktiCellInSheet_(e, fileId, displayName) {
-  if (!e.range || !fileId) return;
+function updateBuktiCellInSheet_(e, urlsOrFileId, displayName) {
+  if (!e.range || !urlsOrFileId) return;
   var sheet = e.range.getSheet();
   var row = e.range.getRow();
   var lastCol = sheet.getLastColumn();
   var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  var url = "https://drive.google.com/file/d/" + fileId + "/view";
+  var value = String(urlsOrFileId);
+  if (value.indexOf("http") !== 0 && value.indexOf("\n") < 0) {
+    value = "https://drive.google.com/file/d/" + value + "/view";
+  }
   for (var c = 0; c < headers.length; c++) {
     if (!/bukti transaksi/i.test(String(headers[c]))) continue;
-    sheet.getRange(row, c + 1).setValue(url);
-    sheet.getRange(row, c + 1).setNote("Nama file: " + String(displayName).slice(0, 120));
+    sheet.getRange(row, c + 1).setValue(value);
+    if (displayName) {
+      sheet.getRange(row, c + 1).setNote("Bukti: " + String(displayName).slice(0, 120));
+    }
     return;
   }
+}
+
+function extractAllDriveFileIdsFromText_(text) {
+  var out = [];
+  var seen = {};
+  String(text || "")
+    .split(/[\r\n]+|[,;]+/)
+    .forEach(function (part) {
+      var id = extractDriveFileId_(String(part || "").trim());
+      if (id && !seen[id]) {
+        seen[id] = true;
+        out.push(id);
+      }
+    });
+  if (!out.length) {
+    var re = /\/file\/d\/([a-zA-Z0-9_-]+)/g;
+    var m;
+    while ((m = re.exec(String(text || "")))) {
+      if (m[1] && !seen[m[1]]) {
+        seen[m[1]] = true;
+        out.push(m[1]);
+      }
+    }
+  }
+  return out;
+}
+
+function getMarkedCopyId_(sourceId, driveRootId, destFolderId) {
+  var map = loadCopyMap_();
+  var v = map[copyTrackKey_(sourceId, driveRootId, destFolderId)];
+  if (!v || v === "inbox") return null;
+  return String(v);
+}
+
+function driveFileViewUrl_(fileId) {
+  return "https://drive.google.com/file/d/" + fileId + "/view";
+}
+
+function rebuildHubRowBuktiEntityLinks_(sheet, row, jenisLabel) {
+  if (!sheet || row < 2) return false;
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var buktiCol = findHeaderColumnIndex_(headers, /bukti transaksi/i);
+  var entCol = findHeaderColumnIndex_(headers, /entitas pengeluaran/i);
+  if (buktiCol < 0) return false;
+  var buktiRaw = String(sheet.getRange(row, buktiCol + 1).getValue() || "");
+  var sourceIds = extractAllDriveFileIdsFromText_(buktiRaw);
+  if (!sourceIds.length) return false;
+  var ent = entCol >= 0 ? String(sheet.getRange(row, entCol + 1).getValue() || "").trim() : "";
+  var route = matchEntityRoute_(ent);
+  if (!route) return false;
+  var rootId = effectiveDriveRootId_(route);
+  if (!rootId) return false;
+  var entityFolder = resolveEntityDriveFolder_(route, jenisLabel, rootId);
+  var urls = [];
+  var changed = false;
+  sourceIds.forEach(function (sid) {
+    var entityId = getMarkedCopyId_(sid, rootId, entityFolder.getId());
+    if (entityId && entityId !== sid) changed = true;
+    urls.push(driveFileViewUrl_(entityId || sid));
+  });
+  if (changed) {
+    sheet.getRange(row, buktiCol + 1).setValue(urls.join("\n"));
+    return true;
+  }
+  return false;
+}
+
+function syncAllHubBuktiLinksToEntity_() {
+  var hubId = String(MULTI_DRIVE_CONFIG.HUB_SPREADSHEET_ID || "").trim();
+  if (!hubId) return 0;
+  var ss = SpreadsheetApp.openById(hubId);
+  var tabs = [
+    { name: MULTI_DRIVE_CONFIG.HUB_TAB_KAS_KECIL || "KAS KECIL", jenis: "Kas Kecil" },
+    { name: MULTI_DRIVE_CONFIG.HUB_TAB_KAS_BESAR || "Bank", jenis: "Bank" }
+  ];
+  var updated = 0;
+  tabs.forEach(function (tab) {
+    var sh = ss.getSheetByName(tab.name);
+    if (!sh || sh.getLastRow() < 2) return;
+    var r;
+    for (r = 2; r <= sh.getLastRow(); r++) {
+      if (rebuildHubRowBuktiEntityLinks_(sh, r, tab.jenis)) updated++;
+    }
+  });
+  return updated;
+}
+
+function syncAllHubBuktiLinksToEntityMenu() {
+  var n = syncAllHubBuktiLinksToEntity_();
+  toastMultiDrive_("Link bukti hub diperbarui: " + n + " baris.", "GBC Multi Drive", 6);
+}
+
+function updateHubRowsForCompiledFile_(compiledSourceId, entityCopyId, entityHint, jenisLabel) {
+  var hubId = String(MULTI_DRIVE_CONFIG.HUB_SPREADSHEET_ID || "").trim();
+  if (!hubId || !compiledSourceId || !entityCopyId) return;
+  var ss = SpreadsheetApp.openById(hubId);
+  var tabs = [
+    { name: MULTI_DRIVE_CONFIG.HUB_TAB_KAS_KECIL || "KAS KECIL", jenis: "Kas Kecil" },
+    { name: MULTI_DRIVE_CONFIG.HUB_TAB_KAS_BESAR || "Bank", jenis: "Bank" }
+  ];
+  tabs.forEach(function (tab) {
+    if (jenisLabel && tab.jenis !== jenisLabel) return;
+    var sh = ss.getSheetByName(tab.name);
+    if (!sh || sh.getLastRow() < 2) return;
+    var r;
+    for (r = 2; r <= sh.getLastRow(); r++) {
+      var buktiCol = findHeaderColumnIndex_(sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0], /bukti transaksi/i);
+      if (buktiCol < 0) continue;
+      var cell = String(sh.getRange(r, buktiCol + 1).getValue() || "");
+      if (cell.indexOf(compiledSourceId) < 0) continue;
+      rebuildHubRowBuktiEntityLinks_(sh, r, tab.jenis);
+    }
+  });
+}
+
+function runHubMultiDriveLastRowKasKecil() {
+  runHubMultiDriveLastRow_("KAS KECIL", MULTI_DRIVE_CONFIG.HUB_TAB_KAS_KECIL || "KAS KECIL");
+}
+
+function runHubMultiDriveLastRowKasBesar() {
+  runHubMultiDriveLastRow_("KAS BESAR", MULTI_DRIVE_CONFIG.HUB_TAB_KAS_BESAR || "Bank");
+}
+
+function runHubMultiDriveLastRow_(kasType, tabName) {
+  var hubId = String(MULTI_DRIVE_CONFIG.HUB_SPREADSHEET_ID || "").trim();
+  if (!hubId) throw new Error("HUB_SPREADSHEET_ID belum di-set.");
+  var ss = SpreadsheetApp.openById(hubId);
+  var sh = ss.getSheetByName(tabName);
+  if (!sh || sh.getLastRow() < 2) throw new Error("Tab " + tabName + " kosong.");
+  var e = buildEventFromSheetRow_(sh, sh.getLastRow());
+  handleMultiDriveSubmit_(e, kasType);
+  var n = syncAllHubBuktiLinksToEntity_();
+  toastMultiDrive_("Baris terakhir diproses. Hub link diperbarui: " + n + " baris.", "GBC Multi Drive", 7);
 }
 
 function normalizeText_(s) {

@@ -757,13 +757,65 @@ function colorJenisKasColumn_(sh, startRow, numRows) {
 }
 
 function extractBuktiUrl_(raw) {
+  var urls = extractBuktiUrls_(raw);
+  return urls.length ? urls[0] : "";
+}
+
+/** Semua link bukti (baris baru / koma / titik koma). */
+function extractBuktiUrls_(raw) {
   var s = String(raw || "").trim();
-  if (!s) return "";
-  var m = s.match(/https?:\/\/[^\s,]+/i);
-  if (m) return m[0].replace(/[)\]"'>,.;]+$/, "");
-  var id = s.match(/(?:\/file\/d\/|id=)([a-zA-Z0-9_-]{10,})/);
-  if (id) return "https://drive.google.com/file/d/" + id[1] + "/view";
-  return "";
+  if (!s) return [];
+  var parts = s.split(/[\r\n]+|[,;]+/);
+  var out = [];
+  var seen = {};
+  parts.forEach(function (part) {
+    part = String(part || "").trim();
+    if (!part) return;
+    var url = "";
+    var m = part.match(/https?:\/\/[^\s,]+/i);
+    if (m) url = m[0].replace(/[)\]"'>,.;]+$/, "");
+    else {
+      var id = part.match(/(?:\/file\/d\/|id=)([a-zA-Z0-9_-]{10,})/);
+      if (id) url = "https://drive.google.com/file/d/" + id[1] + "/view";
+      else if (/^[a-zA-Z0-9_-]{20,}$/.test(part)) url = "https://drive.google.com/file/d/" + part + "/view";
+    }
+    if (url && !seen[url]) {
+      seen[url] = true;
+      out.push(url);
+    }
+  });
+  if (!out.length) {
+    var re = /https?:\/\/[^\s\r\n,;]+/gi;
+    var match;
+    while ((match = re.exec(s))) {
+      var u = match[0].replace(/[)\]"'>,.;]+$/, "");
+      if (u && !seen[u]) {
+        seen[u] = true;
+        out.push(u);
+      }
+    }
+  }
+  return out;
+}
+
+function applyBuktiRichText_(cell, urls) {
+  if (!urls || !urls.length) return;
+  if (urls.length === 1) {
+    cell.setRichTextValue(
+      SpreadsheetApp.newRichTextValue().setText("Buka bukti").setLinkUrl(urls[0]).build()
+    );
+  } else {
+    cell.setValue(urls.join("\n"));
+    cell.setRichTextValue(
+      SpreadsheetApp.newRichTextValue()
+        .setText("Buka bukti (" + urls.length + ")")
+        .setLinkUrl(urls[0])
+        .build()
+    );
+    cell.setNote(urls.join("\n"));
+  }
+  cell.setFontColor(SHEET_THEME.headerBg);
+  cell.setFontWeight("bold");
 }
 
 /** Rich text link — hindari HYPERLINK() yang sering "Error mengurai formula" jika URL panjang/khusus. */
@@ -771,19 +823,12 @@ function applyBuktiLinks_(sh, startRow, numRows) {
   var col = COMPILED_COL.bukti;
   for (var i = 0; i < numRows; i++) {
     var cell = sh.getRange(startRow + i, col);
-    var url = extractBuktiUrl_(cell.getValue());
-    if (!url) continue;
+    var urls = extractBuktiUrls_(cell.getValue());
+    if (!urls.length) continue;
     try {
-      cell.setRichTextValue(
-        SpreadsheetApp.newRichTextValue()
-          .setText("Buka bukti")
-          .setLinkUrl(url)
-          .build()
-      );
-      cell.setFontColor(SHEET_THEME.headerBg);
-      cell.setFontWeight("bold");
+      applyBuktiRichText_(cell, urls);
     } catch (e) {
-      cell.setValue(url);
+      cell.setValue(urls.join("\n"));
     }
   }
 }
@@ -890,16 +935,12 @@ function findInputCol_(headers, re) {
 function applyBuktiLinksOnColumn_(sh, startRow, numRows, col) {
   for (var i = 0; i < numRows; i++) {
     var cell = sh.getRange(startRow + i, col);
-    var url = extractBuktiUrl_(cell.getValue());
-    if (!url) continue;
+    var urls = extractBuktiUrls_(cell.getValue());
+    if (!urls.length) continue;
     try {
-      cell.setRichTextValue(
-        SpreadsheetApp.newRichTextValue().setText("Buka bukti").setLinkUrl(url).build()
-      );
-      cell.setFontColor(SHEET_THEME.headerBg);
-      cell.setFontWeight("bold");
+      applyBuktiRichText_(cell, urls);
     } catch (e) {
-      cell.setValue(url);
+      cell.setValue(urls.join("\n"));
     }
   }
 }

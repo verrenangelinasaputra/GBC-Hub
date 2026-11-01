@@ -165,8 +165,8 @@ function isHttpUrl(val) {
   }
 }
 
-function extractGoogleDriveFileId(raw) {
-  const s = String(raw ?? "").trim();
+function driveFileIdFromPart(part) {
+  const s = String(part ?? "").trim();
   if (!s) return "";
   if (/^[a-zA-Z0-9_-]{20,}$/.test(s) && !/^https?:/i.test(s)) return s;
   const patterns = [
@@ -181,13 +181,55 @@ function extractGoogleDriveFileId(raw) {
   return "";
 }
 
-/** Preview Drive file yang sama setelah dipindah/rename Apps Script (ID tidak berubah). */
-function resolveBuktiHref(raw) {
+function extractGoogleDriveFileId(raw) {
+  const hrefs = resolveBuktiHrefs(raw);
+  if (!hrefs.length) return driveFileIdFromPart(raw);
+  return driveFileIdFromPart(hrefs[0]);
+}
+
+/** Semua link bukti (baris baru / koma / titik koma). */
+function resolveBuktiHrefs(raw) {
   const s = String(raw ?? "").trim();
-  if (!s) return "";
-  const id = extractGoogleDriveFileId(s);
-  if (id) return `https://drive.google.com/file/d/${id}/view`;
-  return isHttpUrl(s) ? s : "";
+  if (!s) return [];
+  const parts = s.split(/[\r\n]+|[,;]+/).map(p => p.trim()).filter(Boolean);
+  const out = [];
+  const seen = new Set();
+  for (const part of parts) {
+    let href = "";
+    if (/^https?:\/\//i.test(part)) href = part;
+    else {
+      const id = driveFileIdFromPart(part);
+      if (id) href = `https://drive.google.com/file/d/${id}/view`;
+    }
+    if (href && !seen.has(href)) {
+      seen.add(href);
+      out.push(href);
+    }
+  }
+  return out;
+}
+
+/** Link bukti pertama (kompatibilitas). */
+function resolveBuktiHref(raw) {
+  const hrefs = resolveBuktiHrefs(raw);
+  return hrefs[0] || "";
+}
+
+function formatBuktiCellHtml(raw) {
+  const hrefs = resolveBuktiHrefs(raw);
+  if (!hrefs.length) {
+    const s = String(raw ?? "").trim();
+    return s ? escapeHtml(s) : '<span class="cell-empty">—</span>';
+  }
+  if (hrefs.length === 1) {
+    return `<a class="cell-link" href="${escapeHtml(hrefs[0])}" target="_blank" rel="noopener noreferrer">Buka bukti ↗</a>`;
+  }
+  return `<span class="cell-bukti-multi">${hrefs
+    .map(
+      (href, i) =>
+        `<a class="cell-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Bukti ${i + 1} ↗</a>`
+    )
+    .join(" ")}</span>`;
 }
 
 function parseMoney(val) {
@@ -202,11 +244,13 @@ function parseMoney(val) {
 function formatSheetCell(header, value) {
   const v = String(value ?? "").trim();
   if (!v) return '<span class="cell-empty">—</span>';
-  const buktiHref = /bukti|lampiran|file upload/i.test(header.toLowerCase()) ? resolveBuktiHref(v) : "";
-  const linkHref = buktiHref || (isHttpUrl(v) ? v : "");
+  if (/bukti|lampiran|file upload/i.test(header.toLowerCase())) {
+    return formatBuktiCellHtml(v);
+  }
+  const linkHref = isHttpUrl(v) ? v : "";
   if (linkHref) {
     const isDrive = /drive\.google|docs\.google/i.test(linkHref);
-    const label = /bukti/i.test(header.toLowerCase()) && isDrive ? "Buka bukti ↗" : isDrive ? "Buka Drive ↗" : "Buka link ↗";
+    const label = isDrive ? "Buka Drive ↗" : "Buka link ↗";
     return `<a class="cell-link" href="${escapeHtml(linkHref)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
   }
   const h = header.toLowerCase();
@@ -1508,10 +1552,7 @@ async function loadKindRecap(kind) {
     }
     data.recent.forEach(r => {
       const tr = document.createElement("tr");
-      const buktiHref = resolveBuktiHref(r.bukti);
-      const buktiCell = buktiHref
-        ? `<a class="cell-link" href="${escapeHtml(buktiHref)}" target="_blank" rel="noopener noreferrer">Buka bukti ↗</a>`
-        : escapeHtml(r.bukti || "—");
+      const buktiCell = formatBuktiCellHtml(r.bukti);
       tr.innerHTML = `
         <td>${r.no}</td>
         <td>${escapeHtml(r.timestamp || "—")}</td>
@@ -1608,10 +1649,7 @@ async function loadSuperAdminRecap() {
     }
     data.recent.forEach(r => {
       const tr = document.createElement("tr");
-      const buktiHref = resolveBuktiHref(r.bukti);
-      const buktiCell = buktiHref
-        ? `<a class="cell-link" href="${escapeHtml(buktiHref)}" target="_blank" rel="noopener noreferrer">Buka bukti ↗</a>`
-        : escapeHtml(r.bukti || "—");
+      const buktiCell = formatBuktiCellHtml(r.bukti);
       tr.innerHTML = `
         <td>${r.no}</td>
         <td><span class="sa-jenis-badge" data-jenis="${escapeHtml(r.jenis)}">${escapeHtml(r.jenis || "—")}</span></td>
