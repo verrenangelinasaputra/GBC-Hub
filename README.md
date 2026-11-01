@@ -12,7 +12,7 @@ Portal internal dengan login username/password, RBAC, input transaksi via **web 
 Spreadsheet hub default: `1sRiwrn_nLHhp3mb1qyEnC0mxnleLSwF5AbsfuQ0o-LY`.  
 Apps Script opsional (format sheet manual): lihat [docs/APPS_SCRIPT_SETUP.md](docs/APPS_SCRIPT_SETUP.md).
 
-## Role & URL
+## Role & URLs
 
 | Role | Login | Akses |
 |---|---|---|
