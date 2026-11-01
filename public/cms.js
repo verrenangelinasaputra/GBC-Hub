@@ -35,6 +35,99 @@ function rupiah(value) {
   return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value || 0);
 }
 
+function formatTanggalId(iso) {
+  const s = String(iso ?? "").trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return s || "—";
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+function fieldVal(form, name) {
+  const el = form.querySelector(`[name="${name}"]`);
+  return String(el?.value ?? "").trim();
+}
+
+/** Modal verifikasi sebelum submit transaksi (hindari kepencet). */
+function showTxSubmitConfirmModal(summary) {
+  return new Promise(resolve => {
+    document.getElementById("txConfirmModal")?.remove();
+    const kind = summary.kindLabel || "Kas Kecil";
+    const dest = summary.destinationTab ? ` (tab ${summary.destinationTab})` : "";
+    const buktiHtml =
+      summary.buktiFiles?.length > 0
+        ? `<ul class="confirm-bukti-list">${summary.buktiFiles
+            .map(f => `<li>${escapeHtml(f)}</li>`)
+            .join("")}</ul>`
+        : escapeHtml(summary.buktiLink || "—");
+
+    const rows = [
+      ["Tanggal", formatTanggalId(summary.tanggal)],
+      ["Entitas", summary.entitas],
+      ["Kategori", summary.category],
+      ["Nama transaksi", summary.namaTransaksi],
+      ["Jumlah", summary.amountLabel],
+      ["Dibayarkan kepada", summary.dibayarkan],
+      ["Sumber dana", summary.sumberDana],
+      ["Keterangan", summary.keterangan || "—"],
+      ["Bukti", buktiHtml],
+      ["PIC", summary.pic]
+    ];
+
+    const overlay = document.createElement("div");
+    overlay.id = "txConfirmModal";
+    overlay.className = "confirm-modal";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-labelledby", "txConfirmTitle");
+    overlay.innerHTML = `
+      <button type="button" class="confirm-modal-backdrop" aria-label="Tutup"></button>
+      <div class="confirm-modal-panel">
+        <div class="confirm-modal-head">
+          <span class="confirm-modal-badge">Verifikasi</span>
+          <h3 id="txConfirmTitle">Konfirmasi pengiriman</h3>
+          <p class="confirm-modal-lead">Apakah Anda yakin kirim transaksi dengan detail berikut ke <strong>${escapeHtml(kind)}</strong>${escapeHtml(dest)}?</p>
+        </div>
+        <dl class="confirm-summary">
+          ${rows
+            .map(([label, val]) => {
+              const isHtml = label === "Bukti" && summary.buktiFiles?.length;
+              return `<div class="confirm-row"><dt>${escapeHtml(label)}</dt><dd>${isHtml ? val : escapeHtml(String(val || "—"))}</dd></div>`;
+            })
+            .join("")}
+        </dl>
+        <p class="confirm-modal-note">Setelah dikirim, data masuk spreadsheet dan bukti di-upload ke Drive. Periksa kembali sebelum melanjutkan.</p>
+        <div class="confirm-modal-actions">
+          <button type="button" class="btn btn-soft btn-full-mobile" id="txConfirmCancel">Batal, periksa lagi</button>
+          <button type="button" class="btn btn-primary btn-full-mobile" id="txConfirmOk">Ya, kirim &amp; simpan</button>
+        </div>
+      </div>`;
+
+    document.body.append(overlay);
+    document.body.classList.add("confirm-modal-open");
+
+    let done = false;
+    const finish = ok => {
+      if (done) return;
+      done = true;
+      document.removeEventListener("keydown", onKey);
+      overlay.remove();
+      document.body.classList.remove("confirm-modal-open");
+      resolve(ok);
+    };
+
+    const onKey = ev => {
+      if (ev.key === "Escape") finish(false);
+    };
+    document.addEventListener("keydown", onKey);
+
+    overlay.querySelector("#txConfirmCancel").addEventListener("click", () => finish(false));
+    overlay.querySelector(".confirm-modal-backdrop").addEventListener("click", () => finish(false));
+    overlay.querySelector("#txConfirmOk").addEventListener("click", () => finish(true));
+
+    requestAnimationFrame(() => overlay.querySelector("#txConfirmOk")?.focus());
+  });
+}
+
 function compactRupiah(value) {
   const v = Number(value) || 0;
   if (Math.abs(v) >= 1e9) return "Rp" + (v / 1e9).toFixed(1) + "M";
@@ -682,11 +775,13 @@ function renderKasPage(root, kind, layout = "form") {
           </label>
           ${
             state.driveUploadReady
-              ? `<label>9. Bukti Transaksi <span class="req">*</span>
+              ? `<div class="bukti-field">
+            <label for="buktiFilesInput">9. Bukti Transaksi <span class="req">*</span>
             <input type="file" id="buktiFilesInput" name="buktiFiles" accept="image/*,application/pdf,.pdf,.png,.jpg,.jpeg,.webp" multiple ${dis} ${canSubmit ? "required" : ""}>
             <span class="form-hint" id="buktiFilesHint">${escapeHtml(uploadNote)} Pilih banyak sekaligus di galeri, atau tambah foto satu per satu (maks. 5 × 10 MB).</span>
+            </label>
             <ul class="bukti-files-list" id="buktiFilesList" aria-live="polite"></ul>
-          </label>
+          </div>
           <label>Link bukti (opsional jika sudah upload)
             <input type="url" name="bukti" placeholder="https://drive.google.com/..." ${dis}>
           </label>`
@@ -789,13 +884,14 @@ function renderKasPage(root, kind, layout = "form") {
           const meta = document.createElement("span");
           meta.className = "bukti-files-meta";
           const size = formatBuktiFileSize(f.size);
+          meta.title = f.name;
           meta.textContent = size ? `${f.name} (${size})` : f.name;
           const rm = document.createElement("button");
           rm.type = "button";
-          rm.className = "bukti-files-remove";
+          rm.className = "bukti-files-remove btn btn-soft";
           rm.dataset.index = String(i);
           rm.setAttribute("aria-label", `Hapus ${f.name} dari daftar bukti`);
-          rm.textContent = "Hapus";
+          rm.textContent = "✕ Hapus file";
           li.append(meta, rm);
           buktiList.append(li);
         });
@@ -839,6 +935,39 @@ function renderKasPage(root, kind, layout = "form") {
       if (tanggalInput && !String(tanggalInput.value || "").trim()) {
         tanggalInput.value = todayIso();
       }
+      if (!txForm.checkValidity()) {
+        txForm.reportValidity();
+        return;
+      }
+      const amountRaw = fieldVal(txForm, "amount");
+      const amountNum = parseMoney(amountRaw);
+      const buktiFileNames =
+        buktiHeld.length > 0
+          ? buktiHeld.map(f => {
+              const sz =
+                f.size >= 1024 * 1024
+                  ? `${(f.size / (1024 * 1024)).toFixed(1)} MB`
+                  : `${Math.round(f.size / 1024)} KB`;
+              return `${f.name} (${sz})`;
+            })
+          : [];
+      const confirmed = await showTxSubmitConfirmModal({
+        kindLabel: isBesar ? "Bank (Kas Besar)" : "Kas Kecil",
+        destinationTab: isBesar ? state.links.kasBesarTab || "Bank" : state.links.kasKecilTab || "KAS KECIL",
+        tanggal: tanggalInput?.value || fieldVal(txForm, "tanggal"),
+        entitas: fieldVal(txForm, "entitas"),
+        category: fieldVal(txForm, "category"),
+        namaTransaksi: fieldVal(txForm, "namaTransaksi"),
+        amountLabel: amountNum != null && amountNum > 0 ? rupiah(amountNum) : amountRaw || "—",
+        keterangan: fieldVal(txForm, "keterangan"),
+        dibayarkan: fieldVal(txForm, "dibayarkan"),
+        sumberDana: fieldVal(txForm, "sumberDana"),
+        buktiFiles: buktiFileNames,
+        buktiLink: fieldVal(txForm, "bukti") || (buktiFileNames.length ? "" : "—"),
+        pic: fieldVal(txForm, "pic")
+      });
+      if (!confirmed) return;
+
       const fd = new FormData(txForm);
       if (tanggalInput?.value) fd.set("tanggal", tanggalInput.value);
       btn.disabled = true;
