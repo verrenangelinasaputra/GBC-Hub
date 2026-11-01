@@ -1,6 +1,6 @@
 # Weekly Recap Email (Apps Script)
 
-Email **HTML** otomatis setiap **Minggu 11:00 WIB** — recap **Senin–Minggu** (minggu kalender, mis. minggu ke-23) berdasarkan **Tanggal Pengeluaran** di hub spreadsheet.
+Email **HTML** otomatis setiap **Senin 11:00 WIB** — recap **minggu selesai terakhir** (**Senin–Minggu**, mis. minggu ke-23) berdasarkan **Tanggal Pengeluaran** di hub spreadsheet.
 
 ## Penerima default
 
@@ -29,13 +29,13 @@ Menu (refresh spreadsheet): **GBC Weekly Recap**
 | Menu | Fungsi |
 |------|--------|
 | Kirim recap minggu ini (test) | Kirim sekarang |
-| Pasang trigger Minggu 11:00 | Scheduler mingguan |
+| Pasang trigger Senin 11:00 | Scheduler mingguan |
 | Hapus trigger recap | Stop otomatis |
 
 ## Trigger manual (UI Google)
 
-**Pemicu** → Tambah → **Berdasarkan waktu** → Minggu → jam **8–9** → fungsi `sendWeeklyRecapEmail`  
-(Atau pakai menu **Pasang trigger** — sudah set `nearMinute(40)`.)
+**Pemicu** → Tambah → **Berdasarkan waktu** → **Senin** → jam **11:00** → fungsi `sendWeeklyRecapEmail`  
+(Atau pakai menu **Pasang trigger** — mengikuti `SEND_WEEKDAY` / `SEND_HOUR` di CONFIG.)
 
 ## Konfigurasi (`WEEKLY_RECAP_CONFIG`)
 

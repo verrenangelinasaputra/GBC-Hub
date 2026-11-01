@@ -12,7 +12,7 @@
  * Trigger spreadsheet TIDAK punya e.response — hanya e.namedValues + e.range.
  * Versi lama exit di `if (!e.response) return` → tidak error, file tidak pindah.
  *
- * Nama file: {waktu upload} - {Entitas} - {Kategori} - {Nama transaksi}.ext
+ * Nama file: tanggal_entitas_namaTransaksi_jumlah.ext
  *
  * Debug: jalankan debugRunOnLastRowKasKecil() dari editor, cek sheet _GBC_Bukti_Log
  *
@@ -179,6 +179,7 @@ function handleFormSubmit_(e, kasType) {
   if (!e) return false;
 
   var payload = parseSubmitPayload_(e);
+  enrichPayloadFromSheetRow_(e, payload);
   enrichFileIdsFromSheetRow_(e, payload.fileIds);
 
   if (!payload.fileIds.length) {
@@ -201,10 +202,10 @@ function handleFormSubmit_(e, kasType) {
       try {
         var file = DriveApp.getFileById(id);
         var newName = buildBuktiFileName_(
-          payload.uploadedAt,
+          payload.tanggalRaw,
           payload.entity,
-          payload.category,
           payload.namaTransaksi,
+          payload.amountRaw,
           file
         );
         if (payload.fileIds.length > 1) {
@@ -240,6 +241,7 @@ function parseSubmitPayload_(e) {
     category: "",
     namaTransaksi: "",
     tanggalRaw: "",
+    amountRaw: "",
     uploadedAt: new Date()
   };
 
@@ -280,6 +282,7 @@ function applyFieldFromTitle_(payload, title, val) {
   if (/kategori pengeluaran/i.test(t)) payload.category = text;
   if (/nama transaksi/i.test(t)) payload.namaTransaksi = text;
   if (/tanggal pengeluaran/i.test(t)) payload.tanggalRaw = text;
+  if (/jumlah pengeluaran|jumlah uang|\bjumlah\b.*\(rp\)/i.test(t)) payload.amountRaw = text;
   if (/bukti transaksi/i.test(t) || /file upload/i.test(t)) {
     pushFileIds_(payload.fileIds, val);
   }
@@ -311,6 +314,19 @@ function updateBuktiCellInSheet_(e, fileId, displayName) {
     cell.setValue(url);
     cell.setNote("Nama file: " + label);
     return;
+  }
+}
+
+function enrichPayloadFromSheetRow_(e, payload) {
+  if (!e.range || !payload) return;
+  var sheet = e.range.getSheet();
+  var row = e.range.getRow();
+  if (row < 2) return;
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var values = sheet.getRange(row, 1, row, lastCol).getValues()[0];
+  for (var c = 0; c < headers.length; c++) {
+    applyFieldFromTitle_(payload, String(headers[c] || ""), values[c]);
   }
 }
 
@@ -411,29 +427,51 @@ function formatUploadStamp_(date) {
   return Utilities.formatDate(date, tz, "yyyy-MM-dd_HHmmss");
 }
 
-function sanitizeFileNamePart_(value, maxLen) {
+function sanitizeUnderscorePart_(value, maxLen) {
   maxLen = maxLen || 80;
   return String(value || "")
     .trim()
     .replace(/[\r\n\t]+/g, " ")
-    .replace(/[\\/:*?"<>|]/g, "-")
-    .replace(/\s+/g, " ")
+    .replace(/[\\/:*?"<>|]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
     .slice(0, maxLen)
     .trim() || "Tidak-diisi";
 }
 
-function buildBuktiFileName_(uploadedAt, entity, category, namaTransaksi, file) {
+function normalizeAmountForFile_(raw) {
+  var s = String(raw || "").trim();
+  if (!s) return "0";
+  var n = Number(
+    s
+      .replace(/[^\d,.-]/g, "")
+      .replace(/\.(?=\d{3}(\D|$))/g, "")
+      .replace(",", ".")
+  );
+  if (isFinite(n)) return String(Math.round(Math.abs(n)));
+  var digits = s.replace(/[^\d]/g, "");
+  return digits || "0";
+}
+
+function formatTanggalForFileName_(tanggalRaw) {
+  var d = parseDateId_(tanggalRaw);
+  if (!d || isNaN(d.getTime())) return sanitizeUnderscorePart_(tanggalRaw || "Tanpa-Tanggal", 20);
+  var y = d.getFullYear();
+  var m = ("0" + (d.getMonth() + 1)).slice(-2);
+  var day = ("0" + d.getDate()).slice(-2);
+  return y + "-" + m + "-" + day;
+}
+
+function buildBuktiFileName_(tanggalRaw, entity, namaTransaksi, amountRaw, file) {
   var origName = file.getName();
   var dot = origName.lastIndexOf(".");
   var ext = dot > 0 ? origName.slice(dot) : "";
-  var stamp = formatUploadStamp_(uploadedAt);
-  var parts = [
-    stamp,
-    sanitizeFileNamePart_(entity, 40),
-    sanitizeFileNamePart_(category, 70),
-    sanitizeFileNamePart_(namaTransaksi, 70)
-  ];
-  return parts.join(" - ") + ext;
+  return [
+    formatTanggalForFileName_(tanggalRaw),
+    sanitizeUnderscorePart_(entity, 40),
+    sanitizeUnderscorePart_(namaTransaksi, 80),
+    normalizeAmountForFile_(amountRaw)
+  ].join("_") + ext;
 }
 
 function appendFileIndex_(fileName, index) {

@@ -1,5 +1,5 @@
 /**
- * GBC Cash Management — Weekly recap email (Senin–Minggu, kirim hari Minggu).
+ * GBC Cash Management — Weekly recap email (periode Senin–Minggu, kirim hari Senin).
  *
  * Pasang: tempel di project Apps Script (spreadsheet hub atau standalone).
  * Jalankan installWeeklyRecapTrigger() sekali, authorize Gmail.
@@ -12,8 +12,8 @@ const WEEKLY_RECAP_CONFIG = {
   TAB_BANK: "Bank",
   TAB_KAS_KECIL: "KAS KECIL",
   TIMEZONE: "Asia/Jakarta",
-  /** Senin–Minggu; dikirim hari Minggu jam 11:00 WIB */
-  SEND_WEEKDAY: ScriptApp.WeekDay.SUNDAY,
+  /** Senin–Minggu (minggu kalender); dikirim hari Senin jam 11:00 WIB = rekap minggu selesai terakhir */
+  SEND_WEEKDAY: ScriptApp.WeekDay.MONDAY,
   SEND_HOUR: 11,
   SEND_MINUTE: 0,
   /** Pisahkan koma untuk tambah penerima */
@@ -31,10 +31,32 @@ const WEEKLY_RECAP_CONFIG = {
 
 // ——— Menu ———
 
+function isoWeekdayFromAppWeekDay_(weekDay) {
+  const map = {};
+  map[ScriptApp.WeekDay.MONDAY] = 1;
+  map[ScriptApp.WeekDay.TUESDAY] = 2;
+  map[ScriptApp.WeekDay.WEDNESDAY] = 3;
+  map[ScriptApp.WeekDay.THURSDAY] = 4;
+  map[ScriptApp.WeekDay.FRIDAY] = 5;
+  map[ScriptApp.WeekDay.SATURDAY] = 6;
+  map[ScriptApp.WeekDay.SUNDAY] = 7;
+  return map[weekDay] || 1;
+}
+
 function weeklyRecapScheduleLabel_() {
   const c = WEEKLY_RECAP_CONFIG;
   const mm = ("0" + (c.SEND_MINUTE || 0)).slice(-2);
-  return "Minggu " + c.SEND_HOUR + ":" + mm + " WIB";
+  const dayNames = {
+    [ScriptApp.WeekDay.MONDAY]: "Senin",
+    [ScriptApp.WeekDay.TUESDAY]: "Selasa",
+    [ScriptApp.WeekDay.WEDNESDAY]: "Rabu",
+    [ScriptApp.WeekDay.THURSDAY]: "Kamis",
+    [ScriptApp.WeekDay.FRIDAY]: "Jumat",
+    [ScriptApp.WeekDay.SATURDAY]: "Sabtu",
+    [ScriptApp.WeekDay.SUNDAY]: "Minggu"
+  };
+  const dayLabel = dayNames[c.SEND_WEEKDAY] || "Senin";
+  return dayLabel + " " + c.SEND_HOUR + ":" + mm + " WIB";
 }
 
 function onOpenWeeklyRecapMenu() {
@@ -136,7 +158,7 @@ function debugWeeklyRecapTriggers() {
 // ——— Entry ———
 
 /**
- * Dipanggil trigger Minggu 11:00 WIB. Manual test: testSendWeeklyRecap().
+ * Dipanggil trigger Senin 11:00 WIB (rekap minggu Senin–Minggu sebelumnya). Manual test: testSendWeeklyRecap().
  */
 function sendWeeklyRecapEmail() {
   sendWeeklyRecapCore_({ respectSchedule: true });
@@ -151,8 +173,11 @@ function sendWeeklyRecapCore_(options) {
   const now = new Date();
   if (options.respectSchedule) {
     const dow = Number(Utilities.formatDate(now, tz, "u")); // 1=Mon … 7=Sun
-    if (dow !== 7) {
-      Logger.log("Weekly recap dilewati (bukan Minggu, hari=" + dow + ").");
+    const expected = isoWeekdayFromAppWeekDay_(WEEKLY_RECAP_CONFIG.SEND_WEEKDAY);
+    if (dow !== expected) {
+      Logger.log(
+        "Weekly recap dilewati (hari=" + dow + ", dijadwalkan hari=" + expected + ")."
+      );
       return;
     }
   }
@@ -199,17 +224,26 @@ function sendWeeklyRecapCore_(options) {
   Logger.log("Weekly recap terkirim ke " + recipients.join(", ") + " (" + inWeek.length + " transaksi).");
 }
 
-// ——— Periode Senin–Minggu ———
+// ——— Periode Senin–Minggu (minggu selesai terakhir) ———
 
+/**
+ * Rekap minggu kalender Senin–Minggu.
+ * - Kirim hari Senin: periode = Senin…Minggu minggu lalu (Minggu = kemarin).
+ * - Kirim hari Minggu (legacy): periode = Senin…Minggu minggu berjalan (Minggu = hari ini).
+ */
 function getRecapWeekRange_(asOf, tz) {
   const dow = Number(Utilities.formatDate(asOf, tz, "u"));
+  const sendDow = isoWeekdayFromAppWeekDay_(WEEKLY_RECAP_CONFIG.SEND_WEEKDAY);
   const ymd = Utilities.formatDate(asOf, tz, "yyyy-MM-dd");
   const parts = ymd.split("-").map(Number);
   const noon = new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0);
 
   let end = new Date(noon);
-  if (dow === 7) {
-    /* Minggu: minggu berjalan Mon–Sun (Sun = hari terakhir) */
+  if (sendDow === 1) {
+    /* Senin: rekap 1 minggu terakhir yang sudah selesai (akhir = Minggu kemarin) */
+    end.setDate(end.getDate() - 1);
+  } else if (dow === 7) {
+    /* Minggu: akhir periode = hari ini */
   } else {
     end.setDate(end.getDate() - dow);
   }

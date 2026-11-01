@@ -13,6 +13,16 @@ Ya, maksud Anda dipahami:
 
 Script memakai `file.makeCopy()` — **bukan** `moveTo()`.
 
+## Sumber utama: folder compiled
+
+Arsip compiled bukti pengeluaran:
+
+[1MQK5uTPlCByC6a7gMmYQJsDCU88sXfNM](https://drive.google.com/drive/folders/1MQK5uTPlCByC6a7gMmYQJsDCU88sXfNM)
+
+Menu **Salin compiled → drive entitas** (atau trigger hourly) membaca **seluruh subfolder** di sini, lalu **menyalin** ke drive entitas. File **tetap** di folder compiled.
+
+Entitas & jenis (Bank / Kas Kecil) dikenali dari **path folder** (`bukti pengeluaran GBC` / `KAS KECIL` / …) atau dari **nama file** (`… - GBC - …` atau `Bank_2026-…_GBC_…`).
+
 ## Peta folder entitas
 
 | Entitas | Drive root | Struktur di bawah root |
@@ -62,12 +72,11 @@ Ulangi project/trigger untuk **Kas Besar** → `onFormSubmitKasBesar`
 
 Jika masih terpasang `google-apps-script-organize-bukti.gs` dengan **`moveTo`**, **nonaktifkan trigger-nya** agar file tidak “hilang” dari shared hanya karena dipindah.
 
-### 5. Backfill file yang sudah di shared
+### 5. Salin compiled → drive entitas
 
 1. Buka spreadsheet → menu **GBC Multi Drive Bukti**.
-2. **Salin dari shared → drive entitas (semua file)**  
-   (`distributeAllFromSharedArchive`)
-3. Opsional: **Pasang trigger jam** untuk salinan entitas dari file baru di shared.
+2. **Salin compiled → drive entitas (semua file)** (`distributeAllFromCompiledBukti`)
+3. Opsional: **Pasang trigger jam (compiled → entitas)** — cek ulang trigger lama; ganti ke `distributeAllFromCompiledBukti` jika masih `distributeAllFromSharedArchive`.
 
 Log: sheet **`_GBC_MultiDrive_Log`** di spreadsheet respons.
 

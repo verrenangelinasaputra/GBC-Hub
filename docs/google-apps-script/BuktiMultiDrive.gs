@@ -5,8 +5,8 @@
  * 1. File upload form (atau inbox lama) → SALIN ke arsip shared (tetap utuh di shared).
  * 2. SALIN lagi ke Drive entitas sesuai entitas + jenis (Bank / Kas Kecil).
  *
- * Shared arsip: https://drive.google.com/drive/folders/1notJAqUCTWvfSn_Hy5C3uXcp86MdJNEy
- * Inbox form (legacy OAuth): 1MQK5uTPlCByC6a7gMmYQJsDCU88sXfNM
+ * Compiled bukti (sumber salin ke entitas): https://drive.google.com/drive/folders/1MQK5uTPlCByC6a7gMmYQJsDCU88sXfNM
+ * Shared arsip opsional: 1notJAqUCTWvfSn_Hy5C3uXcp86MdJNEy
  *
  * PASANG:
  * - Bound ke spreadsheet respons Form Kas Kecil / Kas Besar (satu project, dua trigger),
@@ -14,13 +14,28 @@
  * - Trigger: From spreadsheet → On form submit → onFormSubmitKasKecil / onFormSubmitKasBesar
  * - Matikan trigger lama `google-apps-script-organize-bukti.gs` jika masih memindahkan (moveTo).
  *
- * Backfill file yang sudah ada di shared: menu → "Salin dari shared ke drive entitas"
+ * Backfill: menu → "Salin compiled → drive entitas" (folder 1MQK5…)
+ *
+ * Nama file di Drive: tanggal_entitas_namaTransaksi_jumlah.ext
+ * Contoh: 2026-10-14_GBC_test_120000.pdf
+ *
+ * Manifest: butuh scope https://www.googleapis.com/auth/spreadsheets (openById untuk debug dari editor).
  */
 
 var MULTI_DRIVE_CONFIG = {
-  /** Folder arsip pusat (file tetap di sini; entitas dapat salinan) */
+  /**
+   * true = setiap submit form: salin ke shared + salin ke drive entitas (dua salinan dari file form).
+   * false = hanya salin langsung ke drive entitas (tanpa salinan arsip shared).
+   */
+  COPY_TO_SHARED_ON_SUBMIT: true,
+  /**
+   * Folder compiled bukti pengeluaran — salin ke drive entitas (file tetap di folder ini).
+   * https://drive.google.com/drive/folders/1MQK5uTPlCByC6a7gMmYQJsDCU88sXfNM
+   */
+  COMPILED_BUKTI_ROOT_ID: "1MQK5uTPlCByC6a7gMmYQJsDCU88sXfNM",
+  /** Folder arsip shared lama (opsional; menu terpisah) */
   SHARED_ARCHIVE_ROOT_ID: "1notJAqUCTWvfSn_Hy5C3uXcp86MdJNEy",
-  /** Opsional: salin dari inbox (GForm default / OAuth) — tidak memindahkan */
+  /** Alias legacy = sama dengan compiled */
   FORM_INBOX_FOLDER_ID: "1MQK5uTPlCByC6a7gMmYQJsDCU88sXfNM",
   PROCESS_FORM_INBOX: false,
   /** Buat subfolder bulan di shared (selaras organize-bukti) */
@@ -107,17 +122,30 @@ var ENTITY_DRIVE_ROUTES = [
 
 var PROCESSED_COPY_KEY = "MULTI_DRIVE_COPY_V1";
 
+function toastMultiDrive_(message, title, durationSec) {
+  title = title || "GBC Multi Drive";
+  durationSec = durationSec || 5;
+  Logger.log(String(message));
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (ss) ss.toast(String(message), title, durationSec);
+  } catch (e) {
+    Logger.log("toast: " + e);
+  }
+}
+
 // ——— Menu ———
 
 function onOpenMultiDriveBuktiMenu() {
   SpreadsheetApp.getUi()
     .createMenu("GBC Multi Drive Bukti")
-    .addItem("Salin dari shared → drive entitas (semua file)", "distributeAllFromSharedArchive")
-    .addItem("Salin inbox form → shared + entitas", "copyAllFromFormInbox")
+    .addItem("Salin compiled → drive entitas (semua file)", "distributeAllFromCompiledBukti")
+    .addItem("Salin shared lama → drive entitas", "distributeAllFromSharedArchive")
+    .addItem("Salin inbox (hanya file di root) → shared + entitas", "copyAllFromFormInbox")
     .addSeparator()
     .addItem("Debug: baris terakhir Kas Kecil", "debugMultiDriveLastRowKecil")
     .addItem("Debug: baris terakhir Kas Besar", "debugMultiDriveLastRowBesar")
-    .addItem("Pasang trigger jam (shared → entitas)", "installMultiDriveHourlyTrigger")
+    .addItem("Pasang trigger jam (compiled → entitas)", "installMultiDriveHourlyTrigger")
     .addItem("Hapus trigger jam", "removeMultiDriveHourlyTriggers")
     .addToUi();
 }
@@ -126,16 +154,22 @@ function onOpenMultiDriveBuktiMenu() {
 
 function installMultiDriveHourlyTrigger() {
   removeMultiDriveHourlyTriggers();
-  ScriptApp.newTrigger("distributeAllFromSharedArchive").timeBased().everyHours(1).create();
-  SpreadsheetApp.getActive().toast("Trigger hourly: shared → drive entitas aktif.", "GBC Multi Drive", 5);
+  ScriptApp.newTrigger("distributeAllFromCompiledBukti").timeBased().everyHours(1).create();
+  toastMultiDrive_("Trigger hourly: compiled → drive entitas aktif.", "GBC Multi Drive", 5);
+  return "Trigger hourly aktif (distributeAllFromCompiledBukti setiap 1 jam).";
 }
 
 function removeMultiDriveHourlyTriggers() {
+  var removed = 0;
   ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === "distributeAllFromSharedArchive") {
+    var fn = t.getHandlerFunction();
+    if (fn === "distributeAllFromCompiledBukti" || fn === "distributeAllFromSharedArchive") {
       ScriptApp.deleteTrigger(t);
+      removed++;
     }
   });
+  toastMultiDrive_(removed ? "Trigger hourly dihapus (" + removed + ")." : "Tidak ada trigger hourly.", "GBC Multi Drive", 5);
+  return removed;
 }
 
 // ——— Form submit ———
@@ -178,6 +212,7 @@ function runMultiDrivePipeline_(e, kasType, attempt) {
 
 function handleMultiDriveSubmit_(e, kasType) {
   var payload = parseSubmitPayload_(e);
+  enrichPayloadFromSheetRow_(e, payload);
   enrichFileIdsFromSheetRow_(e, payload.fileIds);
   if (!payload.fileIds.length) {
     logMultiDrive_("SKIP", "Tidak ada file bukti", JSON.stringify({ kasType: kasType }), kasType);
@@ -202,18 +237,20 @@ function handleMultiDriveSubmit_(e, kasType) {
     try {
       var source = DriveApp.getFileById(sourceId);
       var fileName = buildBuktiFileName_(
-        payload.uploadedAt,
+        payload.tanggalRaw,
         payload.entity,
-        payload.category,
         payload.namaTransaksi,
+        payload.amountRaw,
         source
       );
       if (payload.fileIds.length > 1) fileName = appendFileIndex_(fileName, index + 1);
 
-      var sharedFolder = resolveSharedArchiveFolder_(payload.entity, archiveKasFolderName, payload.tanggalRaw);
-      var sharedName = uniqueNameInFolder_(sharedFolder, fileName);
-      var sharedCopy = source.makeCopy(sharedName, sharedFolder);
-      markCopyDone_(sourceId, MULTI_DRIVE_CONFIG.SHARED_ARCHIVE_ROOT_ID, sharedFolder.getId(), sharedCopy.getId());
+      if (MULTI_DRIVE_CONFIG.COPY_TO_SHARED_ON_SUBMIT) {
+        var sharedFolder = resolveSharedArchiveFolder_(payload.entity, archiveKasFolderName, payload.tanggalRaw);
+        var sharedName = uniqueNameInFolder_(sharedFolder, fileName);
+        var sharedCopy = source.makeCopy(sharedName, sharedFolder);
+        markCopyDone_(sourceId, MULTI_DRIVE_CONFIG.SHARED_ARCHIVE_ROOT_ID, sharedFolder.getId(), sharedCopy.getId());
+      }
 
       if (entityRootId) {
         var entityFolder = resolveEntityDriveFolder_(entityRoute, jenisLabel, entityRootId);
@@ -233,10 +270,10 @@ function handleMultiDriveSubmit_(e, kasType) {
     try {
       var firstId = payload.fileIds[0];
       var displayName = buildBuktiFileName_(
-        payload.uploadedAt,
+        payload.tanggalRaw,
         payload.entity,
-        payload.category,
         payload.namaTransaksi,
+        payload.amountRaw,
         DriveApp.getFileById(firstId)
       );
       updateBuktiCellInSheet_(e, firstId, displayName);
@@ -247,26 +284,45 @@ function handleMultiDriveSubmit_(e, kasType) {
   return copied > 0;
 }
 
-// ——— Backfill shared → entity drives ———
+// ——— Compiled / arsip → drive entitas (salin, file sumber tetap) ———
+
+function compiledBuktiRootId_() {
+  return (
+    MULTI_DRIVE_CONFIG.COMPILED_BUKTI_ROOT_ID ||
+    MULTI_DRIVE_CONFIG.FORM_INBOX_FOLDER_ID ||
+    ""
+  ).trim();
+}
+
+/** Salin semua bukti dari folder compiled ke drive masing-masing entitas. */
+function distributeAllFromCompiledBukti() {
+  var rootId = compiledBuktiRootId_();
+  if (!rootId) throw new Error("COMPILED_BUKTI_ROOT_ID belum di-set.");
+  return distributeFromArchiveRoot_(rootId, "Compiled");
+}
 
 function distributeAllFromSharedArchive() {
-  var root = DriveApp.getFolderById(MULTI_DRIVE_CONFIG.SHARED_ARCHIVE_ROOT_ID);
+  var rootId = MULTI_DRIVE_CONFIG.SHARED_ARCHIVE_ROOT_ID;
+  if (!rootId) throw new Error("SHARED_ARCHIVE_ROOT_ID belum di-set.");
+  return distributeFromArchiveRoot_(rootId, "Shared");
+}
+
+function distributeFromArchiveRoot_(folderId, label) {
+  var root = DriveApp.getFolderById(folderId);
   var stats = { ok: 0, skip: 0, fail: 0, errors: [] };
-  walkSharedArchive_(root, [], stats);
-  var msg = "Shared→entitas: OK=" + stats.ok + " skip=" + stats.skip + " fail=" + stats.fail;
+  walkArchiveTreeForEntityCopy_(root, [], stats);
+  var msg = label + "→entitas: OK=" + stats.ok + " skip=" + stats.skip + " fail=" + stats.fail;
   Logger.log(msg);
   if (stats.errors.length) Logger.log(stats.errors.join("\n"));
-  try {
-    SpreadsheetApp.getActive().toast(msg, "GBC Multi Drive", 8);
-  } catch (e) {}
+  toastMultiDrive_(msg, "GBC Multi Drive", 8);
   return stats;
 }
 
-function walkSharedArchive_(folder, pathNames, stats) {
+function walkArchiveTreeForEntityCopy_(folder, pathNames, stats) {
   var subs = folder.getFolders();
   while (subs.hasNext()) {
     var sub = subs.next();
-    walkSharedArchive_(sub, pathNames.concat([sub.getName()]), stats);
+    walkArchiveTreeForEntityCopy_(sub, pathNames.concat([sub.getName()]), stats);
   }
   var files = folder.getFiles();
   while (files.hasNext()) {
@@ -299,7 +355,7 @@ function distributeOneSharedFile_(file, pathNames, stats) {
     stats.skip++;
     return;
   }
-  var destName = uniqueNameInFolder_(entityFolder, file.getName());
+  var destName = entityCopyFileName_(file, parsed, entityFolder);
   var copy = file.makeCopy(destName, entityFolder);
   markCopyDone_(sourceId, rootId, entityFolder.getId(), copy.getId());
   stats.ok++;
@@ -343,13 +399,20 @@ function normalizeJenisFromFolderName_(name) {
 }
 
 function parseEntityFromFileName_(fileName) {
-  var m = String(fileName).match(/(?:^|[-_\s])(GBC|Kediri|MJL|BKT|CV Anugerah|CV Lembayung)(?:[-_\s]|$)/i);
+  var s = String(fileName);
+  var std = s.match(/^\d{4}-\d{2}-\d{2}_([^_]+)_/i);
+  if (std) return std[1];
+  var dash = s.match(/\s-\s(GBC|Kediri|MJL|BKT|CV Anugerah|CV Lembayung)\s-/i);
+  if (dash) return dash[1];
+  var m = s.match(/(?:^|[-_\s])(GBC|Kediri|MJL|BKT|CV Anugerah|CV Lembayung)(?:[-_\s]|$)/i);
   return m ? m[1] : "";
 }
 
 function parseJenisFromFileName_(fileName) {
-  if (/^Bank_/i.test(fileName) || /[-\s]Bank[-\s]/i.test(fileName)) return "Bank";
-  if (/Kas Kecil/i.test(fileName) || /^KAS KECIL/i.test(fileName)) return "Kas Kecil";
+  var s = String(fileName);
+  if (/^Bank_/i.test(s) || /[-\s]Bank[-\s]/i.test(s)) return "Bank";
+  if (/Kas Kecil/i.test(s) || /^KAS KECIL/i.test(s)) return "Kas Kecil";
+  if (/KAS BESAR/i.test(s)) return "Bank";
   return "";
 }
 
@@ -377,13 +440,24 @@ function copyAllFromFormInbox() {
       Logger.log(file.getName() + ": " + e);
     }
   }
-  SpreadsheetApp.getActive().toast("Inbox: OK=" + ok + " fail=" + fail, "GBC Multi Drive", 8);
+  toastMultiDrive_("Inbox: OK=" + ok + " fail=" + fail, "GBC Multi Drive", 8);
 }
 
 function parseWebAppStyleFileName_(fileName) {
   var extMatch = String(fileName).match(/(\.[^.]+)$/);
   var ext = extMatch ? extMatch[1] : "";
   var base = String(fileName).slice(0, fileName.length - ext.length).replace(/_(\d+)$/, "");
+  var mNew = base.match(/^(\d{4}-\d{2}-\d{2})_([^_]+)_([^_]+)_(\d+)$/);
+  if (mNew) {
+    return {
+      entity: mNew[2],
+      tanggalRaw: mNew[1],
+      namaTransaksi: mNew[3],
+      amountRaw: mNew[4],
+      jenisLabel: "Bank",
+      archiveKas: "KAS BESAR"
+    };
+  }
   var parts = base.split("_");
   if (parts.length < 5) return null;
   var jenis = parts[0].trim();
@@ -393,17 +467,25 @@ function parseWebAppStyleFileName_(fileName) {
   return {
     entity: entitas,
     tanggalRaw: tanggalRaw,
+    namaTransaksi: parts.slice(3, -1).join("_") || parts[3],
+    amountRaw: "0",
     jenisLabel: jenisLabel,
-    archiveKas: jenisLabel === "Bank" ? "KAS BESAR" : "KAS KECIL",
-    uploadedAt: new Date()
+    archiveKas: jenisLabel === "Bank" ? "KAS BESAR" : "KAS KECIL"
   };
 }
 
 function copyInboxFileToSharedAndEntity_(file, parsed) {
   var route = matchEntityRoute_(parsed.entity);
   if (!route) throw new Error("Entitas tidak dikenali");
+  var built = buildBuktiFileName_(
+    parsed.tanggalRaw,
+    parsed.entity,
+    parsed.namaTransaksi || "bukti",
+    parsed.amountRaw || "0",
+    file
+  );
   var sharedFolder = resolveSharedArchiveFolder_(parsed.entity, parsed.archiveKas, parsed.tanggalRaw);
-  var sharedName = uniqueNameInFolder_(sharedFolder, file.getName());
+  var sharedName = uniqueNameInFolder_(sharedFolder, built);
   if (!wasCopiedBefore_(file.getId(), MULTI_DRIVE_CONFIG.SHARED_ARCHIVE_ROOT_ID, sharedFolder.getId())) {
     file.makeCopy(sharedName, sharedFolder);
     markCopyDone_(file.getId(), MULTI_DRIVE_CONFIG.SHARED_ARCHIVE_ROOT_ID, sharedFolder.getId(), "inbox");
@@ -412,7 +494,7 @@ function copyInboxFileToSharedAndEntity_(file, parsed) {
   if (rootId) {
     var entityFolder = resolveEntityDriveFolder_(route, parsed.jenisLabel, rootId);
     if (!wasCopiedBefore_(file.getId(), rootId, entityFolder.getId())) {
-      file.makeCopy(uniqueNameInFolder_(entityFolder, file.getName()), entityFolder);
+      file.makeCopy(uniqueNameInFolder_(entityFolder, built), entityFolder);
       markCopyDone_(file.getId(), rootId, entityFolder.getId(), "inbox");
     }
   }
@@ -620,6 +702,7 @@ function parseSubmitPayload_(e) {
     category: "",
     namaTransaksi: "",
     tanggalRaw: "",
+    amountRaw: "",
     uploadedAt: new Date()
   };
   if (e.response) {
@@ -652,8 +735,23 @@ function applyFieldFromTitle_(payload, title, val) {
   if (/kategori pengeluaran/i.test(t)) payload.category = text;
   if (/nama transaksi/i.test(t)) payload.namaTransaksi = text;
   if (/tanggal pengeluaran/i.test(t)) payload.tanggalRaw = text;
+  if (/jumlah pengeluaran|jumlah uang|\bjumlah\b.*\(rp\)/i.test(t)) payload.amountRaw = text;
   if (/bukti transaksi/i.test(t)) pushFileIds_(payload.fileIds, val);
   if (/drive\.google\.com/i.test(String(val))) pushFileIds_(payload.fileIds, val);
+}
+
+function enrichPayloadFromSheetRow_(e, payload) {
+  if (!e.range || !payload) return;
+  var sheet = e.range.getSheet();
+  var row = e.range.getRow();
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var values = sheet.getRange(row, 1, row, lastCol).getValues()[0];
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c] || "");
+    var v = values[c] != null ? String(values[c]) : "";
+    applyFieldFromTitle_(payload, h, v);
+  }
 }
 
 function enrichFileIdsFromSheetRow_(e, fileIds) {
@@ -749,23 +847,115 @@ function formatUploadStamp_(date) {
   return Utilities.formatDate(date, tz, "yyyy-MM-dd_HHmmss");
 }
 
-function sanitizeFileNamePart_(value, maxLen) {
+function sanitizeUnderscorePart_(value, maxLen) {
   maxLen = maxLen || 80;
   return String(value || "")
     .trim()
     .replace(/[\r\n\t]+/g, " ")
-    .replace(/[\\/:*?"<>|]/g, "-")
-    .replace(/\s+/g, " ")
+    .replace(/[\\/:*?"<>|]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
     .slice(0, maxLen)
     .trim() || "Tidak-diisi";
 }
 
-function buildBuktiFileName_(uploadedAt, entity, category, namaTransaksi, file) {
+function normalizeAmountForFile_(raw) {
+  var s = String(raw || "").trim();
+  if (!s) return "0";
+  var n = Number(
+    s
+      .replace(/[^\d,.-]/g, "")
+      .replace(/\.(?=\d{3}(\D|$))/g, "")
+      .replace(",", ".")
+  );
+  if (isFinite(n)) return String(Math.round(Math.abs(n)));
+  var digits = s.replace(/[^\d]/g, "");
+  return digits || "0";
+}
+
+function formatTanggalForFileName_(tanggalRaw) {
+  var d = parseDateId_(tanggalRaw);
+  if (!d || isNaN(d.getTime())) return sanitizeUnderscorePart_(tanggalRaw || "Tanpa-Tanggal", 20);
+  var y = d.getFullYear();
+  var m = ("0" + (d.getMonth() + 1)).slice(-2);
+  var day = ("0" + d.getDate()).slice(-2);
+  return y + "-" + m + "-" + day;
+}
+
+/** Format: tanggal_entitas_namaTransaksi_jumlah.ext */
+function buildBuktiFileName_(tanggalRaw, entity, namaTransaksi, amountRaw, file) {
   var origName = file.getName();
   var dot = origName.lastIndexOf(".");
   var ext = dot > 0 ? origName.slice(dot) : "";
-  var stamp = formatUploadStamp_(uploadedAt);
-  return [stamp, sanitizeFileNamePart_(entity, 40), sanitizeFileNamePart_(category, 70), sanitizeFileNamePart_(namaTransaksi, 70)].join(" - ") + ext;
+  return [
+    formatTanggalForFileName_(tanggalRaw),
+    sanitizeUnderscorePart_(entity, 40),
+    sanitizeUnderscorePart_(namaTransaksi, 80),
+    normalizeAmountForFile_(amountRaw)
+  ].join("_") + ext;
+}
+
+function parseFileMetaForRename_(fileName, pathParsed) {
+  var s = String(fileName || "");
+  var extMatch = s.match(/(\.[^.]+)$/);
+  var base = extMatch ? s.slice(0, s.length - extMatch[1].length) : s;
+  base = base.replace(/_\(\d+\)$/, "").replace(/_(\d+)$/, function (m, n) {
+    return Number(n) <= 5 ? "" : m;
+  });
+
+  var mNew = base.match(/^(\d{4}-\d{2}-\d{2})_([^_]+)_([^_]+)_(\d+)$/);
+  if (mNew) {
+    return {
+      tanggalRaw: mNew[1],
+      entity: mNew[2],
+      namaTransaksi: mNew[3],
+      amountRaw: mNew[4]
+    };
+  }
+
+  var dashParts = base.split(/\s-\s/);
+  if (dashParts.length >= 4) {
+    var d0 = dashParts[0].match(/(\d{4}-\d{2}-\d{2})/);
+    return {
+      tanggalRaw: d0 ? d0[1] : dashParts[0],
+      entity: dashParts[1],
+      namaTransaksi: dashParts[dashParts.length - 1],
+      amountRaw: "0"
+    };
+  }
+
+  var parts = base.split("_");
+  if (parts.length >= 5 && /^\d{4}-\d{2}-\d{2}$/.test(parts[1])) {
+    return {
+      tanggalRaw: parts[1],
+      entity: parts[2],
+      namaTransaksi: parts.slice(3, -1).join("_") || parts[3],
+      amountRaw: "0"
+    };
+  }
+
+  if (pathParsed && pathParsed.entityLabel) {
+    return {
+      tanggalRaw: "",
+      entity: pathParsed.entityLabel,
+      namaTransaksi: base,
+      amountRaw: "0"
+    };
+  }
+  return null;
+}
+
+function entityCopyFileName_(file, pathParsed, entityFolder) {
+  var meta = parseFileMetaForRename_(file.getName(), pathParsed);
+  if (!meta) return uniqueNameInFolder_(entityFolder, file.getName());
+  var built = buildBuktiFileName_(
+    meta.tanggalRaw,
+    meta.entity,
+    meta.namaTransaksi,
+    meta.amountRaw,
+    file
+  );
+  return uniqueNameInFolder_(entityFolder, built);
 }
 
 function appendFileIndex_(fileName, index) {
