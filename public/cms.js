@@ -683,8 +683,9 @@ function renderKasPage(root, kind, layout = "form") {
           ${
             state.driveUploadReady
               ? `<label>9. Bukti Transaksi <span class="req">*</span>
-            <input type="file" name="buktiFiles" accept="image/*,application/pdf,.pdf,.png,.jpg,.jpeg,.webp" multiple ${dis} ${canSubmit ? "required" : ""}>
-            <span class="form-hint">${escapeHtml(uploadNote)}</span>
+            <input type="file" id="buktiFilesInput" name="buktiFiles" accept="image/*,application/pdf,.pdf,.png,.jpg,.jpeg,.webp" multiple ${dis} ${canSubmit ? "required" : ""}>
+            <span class="form-hint" id="buktiFilesHint">${escapeHtml(uploadNote)} Pilih banyak sekaligus di galeri, atau tambah foto satu per satu (maks. 5 × 10 MB).</span>
+            <span class="form-hint bukti-files-picked" id="buktiFilesPicked" aria-live="polite"></span>
           </label>
           <label>Link bukti (opsional jika sudah upload)
             <input type="url" name="bukti" placeholder="https://drive.google.com/..." ${dis}>
@@ -762,6 +763,43 @@ function renderKasPage(root, kind, layout = "form") {
   if (txForm) {
     const dateInput = txForm.querySelector('input[name="tanggal"]');
     if (dateInput && !dateInput.value) dateInput.value = todayIso();
+    const buktiInput = txForm.querySelector("#buktiFilesInput");
+    const buktiPicked = txForm.querySelector("#buktiFilesPicked");
+    const MAX_BUKTI_FILES = 5;
+    /** Browser default: pilih file lagi = ganti semua. Kumpulkan di sini supaya bisa tambah bertahap. */
+    const buktiHeld = [];
+    function syncBuktiInputFiles() {
+      if (!buktiInput) return;
+      const dt = new DataTransfer();
+      buktiHeld.forEach(f => dt.items.add(f));
+      buktiInput.files = dt.files;
+      if (buktiPicked) {
+        buktiPicked.textContent = buktiHeld.length
+          ? `Terpilih ${buktiHeld.length} file: ${buktiHeld.map(f => f.name).join(", ")}`
+          : "";
+      }
+    }
+    if (buktiInput) {
+      buktiInput.addEventListener("change", () => {
+        const incoming = [...buktiInput.files];
+        if (!incoming.length) return;
+        for (const f of incoming) {
+          if (buktiHeld.length >= MAX_BUKTI_FILES) {
+            toast(`Maksimal ${MAX_BUKTI_FILES} file bukti per transaksi.`);
+            break;
+          }
+          const dup = buktiHeld.some(
+            h => h.name === f.name && h.size === f.size && h.lastModified === f.lastModified
+          );
+          if (!dup) buktiHeld.push(f);
+        }
+        syncBuktiInputFiles();
+      });
+      txForm.addEventListener("reset", () => {
+        buktiHeld.length = 0;
+        syncBuktiInputFiles();
+      });
+    }
     txForm.addEventListener("submit", async e => {
       e.preventDefault();
       const msg = $("#txFormMessage");

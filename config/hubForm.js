@@ -36,7 +36,7 @@ const ENTITY_TAB_DEFS = [
     sheetName: "ENTITAS CV LEMBAYUNG",
     displayName: "CV Lembayung",
     match(norm) {
-      return /lembayung|cv\s*lembayung/.test(norm);
+      return /lembayung|cv\s*lembayung|^light$|indah\s*terbentang/.test(norm);
     }
   },
   {
