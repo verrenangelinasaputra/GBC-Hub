@@ -245,7 +245,8 @@ function handleMultiDriveSubmit_(e, kasType) {
         payload.entity,
         payload.namaTransaksi,
         payload.amountRaw,
-        source
+        source,
+        kasType
       );
       if (payload.fileIds.length > 1) fileName = appendFileIndex_(fileName, index + 1);
 
@@ -278,7 +279,8 @@ function handleMultiDriveSubmit_(e, kasType) {
         payload.entity,
         payload.namaTransaksi,
         payload.amountRaw,
-        DriveApp.getFileById(firstId)
+        DriveApp.getFileById(firstId),
+        kasType
       );
       updateBuktiCellInSheet_(e, firstId, displayName);
     } catch (ignore) {}
@@ -379,26 +381,46 @@ function normalizeEntityLabel_(raw) {
   return entityLabel;
 }
 
+var WEB_APP_ENTITY_LABELS = ["CV Anugerah", "CV Lembayung", "GBC", "Kediri", "MJL", "BKT"];
+
+function peelKnownEntityFromPrefix_(s) {
+  var t = String(s || "").trim();
+  var i, label;
+  for (i = 0; i < WEB_APP_ENTITY_LABELS.length; i++) {
+    label = WEB_APP_ENTITY_LABELS[i];
+    if (t === label) return { entityLabel: normalizeEntityLabel_(label), rest: "" };
+    if (t.indexOf(label + "_") === 0) {
+      return { entityLabel: normalizeEntityLabel_(label), rest: t.slice(label.length + 1) };
+    }
+  }
+  var idx = t.indexOf("_");
+  if (idx > 0) {
+    return { entityLabel: normalizeEntityLabel_(t.slice(0, idx)), rest: t.slice(idx + 1) };
+  }
+  return { entityLabel: normalizeEntityLabel_(t), rest: "" };
+}
+
+/** tanggal_[Bank|Kas_Kecil]_entitas_nama transaksi_jumlah — spasi di nama/entitas dipertahankan */
 function parseWebAppUploadFileName_(fileName) {
   var base = String(fileName || "").replace(/\.[^.]+$/i, "");
-  var parts = base.split("_");
-  if (parts.length < 4 || !/^\d{4}-\d{2}-\d{2}$/.test(parts[0])) return null;
-  var seg1 = String(parts[1] || "");
-  if (/^bank$/i.test(seg1)) {
-    return {
-      entityLabel: normalizeEntityLabel_(parts[2]),
-      jenisLabel: "Bank"
-    };
+  var amountM = base.match(/_(\d+)$/);
+  if (!amountM || !/^\d{4}-\d{2}-\d{2}_/.test(base)) return null;
+  var withoutAmount = base.slice(0, base.length - amountM[0].length);
+  var dateM = withoutAmount.match(/^(\d{4}-\d{2}-\d{2})_(.+)$/);
+  if (!dateM) return null;
+  var tail = dateM[2];
+  var jenisLabel = "";
+  if (/^bank_/i.test(tail)) {
+    jenisLabel = "Bank";
+    tail = tail.slice(5);
+  } else if (/^kas_kecil_/i.test(tail)) {
+    jenisLabel = "Kas Kecil";
+    tail = tail.slice(10);
   }
-  if (/^kas[-_]?kecil$/i.test(seg1.replace(/\s+/g, ""))) {
-    return {
-      entityLabel: normalizeEntityLabel_(parts[2]),
-      jenisLabel: "Kas Kecil"
-    };
-  }
+  var peeled = peelKnownEntityFromPrefix_(tail);
   return {
-    entityLabel: normalizeEntityLabel_(parts[1]),
-    jenisLabel: ""
+    entityLabel: peeled.entityLabel,
+    jenisLabel: jenisLabel
   };
 }
 
@@ -492,18 +514,18 @@ function findHeaderColumnIndex_(headers, pattern) {
 }
 
 function parseLegacyWebAppAmountParts_(fileName) {
+  var web = parseWebAppUploadFileName_(fileName);
+  if (!web || !web.entityLabel) return null;
   var base = String(fileName || "").replace(/\.[^.]+$/i, "");
-  var parts = base.split("_");
-  if (parts.length < 4 || !/^\d{4}-\d{2}-\d{2}$/.test(parts[0])) return null;
-  if (/^bank$/i.test(parts[1]) || /^kas[-_]?kecil$/i.test(String(parts[1] || "").replace(/\s+/g, ""))) {
-    return null;
-  }
-  var amount = parts[parts.length - 1];
-  if (!/^\d+$/.test(amount)) return null;
+  var amountM = base.match(/_(\d+)$/);
+  if (!amountM) return null;
+  var dateM = base.match(/^(\d{4}-\d{2}-\d{2})_/);
+  if (!dateM) return null;
+  if (web.jenisLabel) return null;
   return {
-    tanggal: parts[0],
-    entityLabel: normalizeEntityLabel_(parts[1]),
-    amount: amount
+    tanggal: dateM[1],
+    entityLabel: web.entityLabel,
+    amount: amountM[1]
   };
 }
 
@@ -641,7 +663,8 @@ function copyInboxFileToSharedAndEntity_(file, parsed) {
     parsed.entity,
     parsed.namaTransaksi || "bukti",
     parsed.amountRaw || "0",
-    file
+    file,
+    parsed.archiveKas
   );
   var sharedFolder = resolveSharedArchiveFolder_(parsed.entity, parsed.archiveKas, parsed.tanggalRaw);
   var sharedName = uniqueNameInFolder_(sharedFolder, built);
@@ -1006,16 +1029,23 @@ function formatUploadStamp_(date) {
   return Utilities.formatDate(date, tz, "yyyy-MM-dd_HHmmss");
 }
 
-function sanitizeUnderscorePart_(value, maxLen) {
+function sanitizeFilePartKeepSpaces_(value, maxLen) {
   maxLen = maxLen || 80;
   return String(value || "")
     .trim()
     .replace(/[\r\n\t]+/g, " ")
     .replace(/[\\/:*?"<>|]/g, "")
-    .replace(/\s+/g, "_")
-    .replace(/_+/g, "_")
+    .replace(/\s+/g, " ")
     .slice(0, maxLen)
     .trim() || "Tidak-diisi";
+}
+
+function jenisFileTokenFromArg_(kasTypeOrJenis) {
+  var s = normalizeText_(kasTypeOrJenis || "");
+  if (!s) return "";
+  if (s.indexOf("besar") >= 0 || s === "bank") return "Bank";
+  if (s.indexOf("kecil") >= 0) return "Kas_Kecil";
+  return "";
 }
 
 function normalizeAmountForFile_(raw) {
@@ -1034,24 +1064,25 @@ function normalizeAmountForFile_(raw) {
 
 function formatTanggalForFileName_(tanggalRaw) {
   var d = parseDateId_(tanggalRaw);
-  if (!d || isNaN(d.getTime())) return sanitizeUnderscorePart_(tanggalRaw || "Tanpa-Tanggal", 20);
+  if (!d || isNaN(d.getTime())) return sanitizeFilePartKeepSpaces_(tanggalRaw || "Tanpa-Tanggal", 20);
   var y = d.getFullYear();
   var m = ("0" + (d.getMonth() + 1)).slice(-2);
   var day = ("0" + d.getDate()).slice(-2);
   return y + "-" + m + "-" + day;
 }
 
-/** Format: tanggal_entitas_namaTransaksi_jumlah.ext */
-function buildBuktiFileName_(tanggalRaw, entity, namaTransaksi, amountRaw, file) {
+/** Format: tanggal_[Bank|Kas_Kecil]_entitas_nama transaksi_jumlah.ext */
+function buildBuktiFileName_(tanggalRaw, entity, namaTransaksi, amountRaw, file, kasTypeOrJenis) {
   var origName = file.getName();
   var dot = origName.lastIndexOf(".");
   var ext = dot > 0 ? origName.slice(dot) : "";
-  return [
-    formatTanggalForFileName_(tanggalRaw),
-    sanitizeUnderscorePart_(entity, 40),
-    sanitizeUnderscorePart_(namaTransaksi, 80),
-    normalizeAmountForFile_(amountRaw)
-  ].join("_") + ext;
+  var parts = [formatTanggalForFileName_(tanggalRaw)];
+  var jenis = jenisFileTokenFromArg_(kasTypeOrJenis);
+  if (jenis) parts.push(jenis);
+  parts.push(sanitizeFilePartKeepSpaces_(entity, 40));
+  parts.push(sanitizeFilePartKeepSpaces_(namaTransaksi, 80));
+  parts.push(normalizeAmountForFile_(amountRaw));
+  return parts.join("_") + ext;
 }
 
 function parseFileMetaForRename_(fileName, pathParsed) {
@@ -1112,7 +1143,8 @@ function entityCopyFileName_(file, pathParsed, entityFolder) {
     meta.entity,
     meta.namaTransaksi,
     meta.amountRaw,
-    file
+    file,
+    pathParsed.jenisLabel
   );
   return uniqueNameInFolder_(entityFolder, built);
 }
