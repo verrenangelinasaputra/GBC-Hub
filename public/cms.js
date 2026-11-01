@@ -685,7 +685,7 @@ function renderKasPage(root, kind, layout = "form") {
               ? `<label>9. Bukti Transaksi <span class="req">*</span>
             <input type="file" id="buktiFilesInput" name="buktiFiles" accept="image/*,application/pdf,.pdf,.png,.jpg,.jpeg,.webp" multiple ${dis} ${canSubmit ? "required" : ""}>
             <span class="form-hint" id="buktiFilesHint">${escapeHtml(uploadNote)} Pilih banyak sekaligus di galeri, atau tambah foto satu per satu (maks. 5 × 10 MB).</span>
-            <span class="form-hint bukti-files-picked" id="buktiFilesPicked" aria-live="polite"></span>
+            <ul class="bukti-files-list" id="buktiFilesList" aria-live="polite"></ul>
           </label>
           <label>Link bukti (opsional jika sudah upload)
             <input type="url" name="bukti" placeholder="https://drive.google.com/..." ${dis}>
@@ -764,19 +764,41 @@ function renderKasPage(root, kind, layout = "form") {
     const dateInput = txForm.querySelector('input[name="tanggal"]');
     if (dateInput && !dateInput.value) dateInput.value = todayIso();
     const buktiInput = txForm.querySelector("#buktiFilesInput");
-    const buktiPicked = txForm.querySelector("#buktiFilesPicked");
+    const buktiList = txForm.querySelector("#buktiFilesList");
     const MAX_BUKTI_FILES = 5;
     /** Browser default: pilih file lagi = ganti semua. Kumpulkan di sini supaya bisa tambah bertahap. */
     const buktiHeld = [];
+    function formatBuktiFileSize(bytes) {
+      const n = Number(bytes);
+      if (!Number.isFinite(n) || n <= 0) return "";
+      if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+      return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    }
     function syncBuktiInputFiles() {
       if (!buktiInput) return;
       const dt = new DataTransfer();
       buktiHeld.forEach(f => dt.items.add(f));
       buktiInput.files = dt.files;
-      if (buktiPicked) {
-        buktiPicked.textContent = buktiHeld.length
-          ? `Terpilih ${buktiHeld.length} file: ${buktiHeld.map(f => f.name).join(", ")}`
-          : "";
+      if (buktiHeld.length) buktiInput.removeAttribute("required");
+      else if (canSubmit) buktiInput.setAttribute("required", "");
+      if (buktiList) {
+        buktiList.replaceChildren();
+        buktiHeld.forEach((f, i) => {
+          const li = document.createElement("li");
+          li.className = "bukti-files-item";
+          const meta = document.createElement("span");
+          meta.className = "bukti-files-meta";
+          const size = formatBuktiFileSize(f.size);
+          meta.textContent = size ? `${f.name} (${size})` : f.name;
+          const rm = document.createElement("button");
+          rm.type = "button";
+          rm.className = "bukti-files-remove";
+          rm.dataset.index = String(i);
+          rm.setAttribute("aria-label", `Hapus ${f.name} dari daftar bukti`);
+          rm.textContent = "Hapus";
+          li.append(meta, rm);
+          buktiList.append(li);
+        });
       }
     }
     if (buktiInput) {
@@ -793,6 +815,15 @@ function renderKasPage(root, kind, layout = "form") {
           );
           if (!dup) buktiHeld.push(f);
         }
+        buktiInput.value = "";
+        syncBuktiInputFiles();
+      });
+      buktiList?.addEventListener("click", e => {
+        const btn = e.target.closest(".bukti-files-remove");
+        if (!btn) return;
+        const idx = Number(btn.dataset.index);
+        if (!Number.isFinite(idx) || idx < 0 || idx >= buktiHeld.length) return;
+        buktiHeld.splice(idx, 1);
         syncBuktiInputFiles();
       });
       txForm.addEventListener("reset", () => {

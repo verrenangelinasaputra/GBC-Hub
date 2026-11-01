@@ -18,6 +18,11 @@ a.nav-link{text-decoration:none}
 .form-grid{display:grid;gap:10px}
 .form-grid label{display:grid;gap:6px;font-size:13px;font-weight:700;color:#6f7c93}
 .form-hint{font-size:12px;font-weight:500;color:#8792a6;line-height:1.55}
+.bukti-files-list{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
+.bukti-files-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;background:#f6f8fc;border:1px solid #e3e8f2;border-radius:8px;font-size:12px;color:#53617a}
+.bukti-files-meta{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.bukti-files-remove{flex-shrink:0;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer}
+.bukti-files-remove:hover{background:#fee2e2}
 .form-grid label .req{color:#c2410c}
 .form-grid input[type=file]{font-size:12px;padding:8px 0}
 .bukti-link-panel{margin:0 0 12px;line-height:1.65}
