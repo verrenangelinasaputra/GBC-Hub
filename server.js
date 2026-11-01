@@ -60,7 +60,11 @@ const {
   peekUploadFolderCache,
   invalidateUploadFolderCache
 } = require("./lib/driveUpload");
-const { buktiDriveFileName, tanggalFromTransactionBody, normalizeTanggalPengeluaran } = require("./lib/buktiFileName");
+const {
+  buktiDriveFileName,
+  tanggalFromTransactionBody,
+  resolveTanggalPengeluaran
+} = require("./lib/buktiFileName");
 const {
   oauthClientConfigured,
   getDriveOAuthUrl,
@@ -825,7 +829,7 @@ async function submitTransaction(req, res, kind) {
   const files = req.files || [];
   const driveUpload = await inspectUploadFolder();
   const payload = normalizeTransactionBody(req.body);
-  payload.tanggal = normalizeTanggalPengeluaran(payload.tanggal);
+  payload.tanggal = resolveTanggalPengeluaran(payload.tanggal);
   payload.pic = picFromSessionUser(req.user) || payload.pic;
   const validationError = validateTransactionPayload(payload, kind, files, driveUpload.ready);
   if (validationError) {

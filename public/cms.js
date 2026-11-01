@@ -44,7 +44,12 @@ function compactRupiah(value) {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
 }
 
 function prettyHeader(raw) {
@@ -761,8 +766,11 @@ function renderKasPage(root, kind, layout = "form") {
       e.preventDefault();
       const msg = $("#txFormMessage");
       const btn = $("#txSubmit");
-      const fd = new FormData(txForm);
       const tanggalInput = txForm.querySelector('[name="tanggal"]');
+      if (tanggalInput && !String(tanggalInput.value || "").trim()) {
+        tanggalInput.value = todayIso();
+      }
+      const fd = new FormData(txForm);
       if (tanggalInput?.value) fd.set("tanggal", tanggalInput.value);
       btn.disabled = true;
       msg.classList.remove("hidden", "error", "success");
