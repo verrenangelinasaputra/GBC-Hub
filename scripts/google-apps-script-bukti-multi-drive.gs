@@ -363,7 +363,7 @@ function distributeOneSharedFile_(file, pathNames, stats) {
     Logger.log("SKIP (sudah pernah disalin): " + file.getName());
     return;
   }
-  var destName = entityCopyFileName_(file, parsed, entityFolder);
+  var destName = uniqueNameInFolder_(entityFolder, file.getName());
   var copy = file.makeCopy(destName, entityFolder);
   markCopyDone_(sourceId, rootId, entityFolder.getId(), copy.getId());
   stats.ok++;
@@ -420,6 +420,35 @@ function parseWebAppUploadFileName_(fileName) {
   var peeled = peelKnownEntityFromPrefix_(tail);
   return {
     entityLabel: peeled.entityLabel,
+    jenisLabel: jenisLabel
+  };
+}
+
+/** Meta lengkap dari nama file web app: tanggal, jenis, entitas, nama transaksi, jumlah */
+function parseWebAppFileMeta_(fileName) {
+  var base = String(fileName || "").replace(/\.[^.]+$/i, "");
+  var amountM = base.match(/_(\d+)$/);
+  if (!amountM || !/^\d{4}-\d{2}-\d{2}_/.test(base)) return null;
+  var amountRaw = amountM[1];
+  var withoutAmount = base.slice(0, base.length - amountM[0].length);
+  var dateM = withoutAmount.match(/^(\d{4}-\d{2}-\d{2})_(.+)$/);
+  if (!dateM) return null;
+  var tanggalRaw = dateM[1];
+  var tail = dateM[2];
+  var jenisLabel = "";
+  if (/^bank_/i.test(tail)) {
+    jenisLabel = "Bank";
+    tail = tail.slice(5);
+  } else if (/^kas_kecil_/i.test(tail)) {
+    jenisLabel = "Kas Kecil";
+    tail = tail.slice(10);
+  }
+  var peeled = peelKnownEntityFromPrefix_(tail);
+  return {
+    tanggalRaw: tanggalRaw,
+    entity: peeled.entityLabel,
+    namaTransaksi: peeled.rest || "",
+    amountRaw: amountRaw,
     jenisLabel: jenisLabel
   };
 }
@@ -555,7 +584,18 @@ function normalizeDateCell_(val) {
   if (val instanceof Date) {
     return Utilities.formatDate(val, "Asia/Jakarta", "yyyy-MM-dd");
   }
+  if (typeof val === "number" && val > 20000 && val < 80000) {
+    var d = new Date(Date.UTC(1899, 11, 30) + val * 86400000);
+    return Utilities.formatDate(d, "Asia/Jakarta", "yyyy-MM-dd");
+  }
   var s = String(val || "").trim();
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    var n = Number(s);
+    if (n > 20000 && n < 80000) {
+      var d2 = new Date(Date.UTC(1899, 11, 30) + n * 86400000);
+      return Utilities.formatDate(d2, "Asia/Jakarta", "yyyy-MM-dd");
+    }
+  }
   var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) return iso[1] + "-" + iso[2] + "-" + iso[3];
   return s;
@@ -1086,22 +1126,13 @@ function buildBuktiFileName_(tanggalRaw, entity, namaTransaksi, amountRaw, file,
 }
 
 function parseFileMetaForRename_(fileName, pathParsed) {
+  var web = parseWebAppFileMeta_(fileName);
+  if (web && web.entity) return web;
+
   var s = String(fileName || "");
   var extMatch = s.match(/(\.[^.]+)$/);
   var base = extMatch ? s.slice(0, s.length - extMatch[1].length) : s;
-  base = base.replace(/_\(\d+\)$/, "").replace(/_(\d+)$/, function (m, n) {
-    return Number(n) <= 5 ? "" : m;
-  });
-
-  var mNew = base.match(/^(\d{4}-\d{2}-\d{2})_([^_]+)_([^_]+)_(\d+)$/);
-  if (mNew) {
-    return {
-      tanggalRaw: mNew[1],
-      entity: mNew[2],
-      namaTransaksi: mNew[3],
-      amountRaw: mNew[4]
-    };
-  }
+  base = base.replace(/_\(\d+\)$/, "");
 
   var dashParts = base.split(/\s-\s/);
   if (dashParts.length >= 4) {
@@ -1110,27 +1141,13 @@ function parseFileMetaForRename_(fileName, pathParsed) {
       tanggalRaw: d0 ? d0[1] : dashParts[0],
       entity: dashParts[1],
       namaTransaksi: dashParts[dashParts.length - 1],
-      amountRaw: "0"
-    };
-  }
-
-  var parts = base.split("_");
-  if (parts.length >= 5 && /^\d{4}-\d{2}-\d{2}$/.test(parts[1])) {
-    return {
-      tanggalRaw: parts[1],
-      entity: parts[2],
-      namaTransaksi: parts.slice(3, -1).join("_") || parts[3],
-      amountRaw: "0"
+      amountRaw: "0",
+      jenisLabel: pathParsed ? pathParsed.jenisLabel : ""
     };
   }
 
   if (pathParsed && pathParsed.entityLabel) {
-    return {
-      tanggalRaw: "",
-      entity: pathParsed.entityLabel,
-      namaTransaksi: base,
-      amountRaw: "0"
-    };
+    return null;
   }
   return null;
 }
@@ -1144,7 +1161,7 @@ function entityCopyFileName_(file, pathParsed, entityFolder) {
     meta.namaTransaksi,
     meta.amountRaw,
     file,
-    pathParsed.jenisLabel
+    meta.jenisLabel || (pathParsed ? pathParsed.jenisLabel : "")
   );
   return uniqueNameInFolder_(entityFolder, built);
 }
