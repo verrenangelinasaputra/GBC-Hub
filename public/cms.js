@@ -216,8 +216,7 @@ function kasMenuBasePath(kind) {
 function userCanSubmitKind(kind) {
   const isBesar = kind === "kas_besar";
   const role = state.user?.role;
-  if (role === "super_admin") return true;
-  if (role === "admin") return !isBesar;
+  if (role === "super_admin" || role === "admin") return true;
   if (role === "member") {
     return isBesar ? !!state.permissions?.submitKasBesar : !!state.permissions?.submitKasKecil;
   }
