@@ -16,8 +16,8 @@
  *
  * Backfill: menu → "Salin compiled → drive entitas" (folder 1MQK5…)
  *
- * Nama file di Drive: tanggal_entitas_namaTransaksi_jumlah.ext
- * Contoh: 2026-10-14_GBC_test_120000.pdf
+ * Nama file di Drive (web app): tanggal_jenis_entitas_namaTransaksi_jumlah.ext
+ * Contoh: 2026-10-14_Bank_GBC_test_120000.pdf  (jenis = Bank | Kas_Kecil)
  *
  * Manifest: butuh scope https://www.googleapis.com/auth/spreadsheets (openById untuk debug dari editor).
  */
@@ -43,7 +43,11 @@ var MULTI_DRIVE_CONFIG = {
   /** Buat subfolder yang belum ada di drive entitas (GBC/Kediri/MJL/…) */
   CREATE_ENTITY_SUBFOLDERS: true,
   TRACK_COPIES_IN_PROPERTIES: true,
-  LOG_SHEET_NAME: "_GBC_MultiDrive_Log"
+  LOG_SHEET_NAME: "_GBC_MultiDrive_Log",
+  /** Lookup jenis (Bank/Kas Kecil) untuk file lama tanpa jenis di nama — tab hub web app */
+  HUB_SPREADSHEET_ID: "1sRiwrn_nLHhp3mb1qyEnC0mxnleLSwF5AbsfuQ0o-LY",
+  HUB_TAB_KAS_BESAR: "Bank",
+  HUB_TAB_KAS_KECIL: "KAS KECIL"
 };
 
 /** Folder Drive CV Anugerah: https://drive.google.com/drive/folders/1e9ZC8iYcAfG43cG9V1Rmmv-5rUutO5Yk */
@@ -338,9 +342,10 @@ function walkArchiveTreeForEntityCopy_(folder, pathNames, stats) {
 }
 
 function distributeOneSharedFile_(file, pathNames, stats) {
-  var parsed = inferFromArchivePath_(pathNames, file.getName());
+  var parsed = inferFromArchivePath_(pathNames, file.getName(), file);
   if (!parsed) {
     stats.skip++;
+    Logger.log("SKIP (entitas/jenis tidak dikenali): " + file.getName() + " path=" + pathNames.join(" / "));
     return;
   }
   var route = matchEntityRoute_(parsed.entityLabel);
@@ -353,6 +358,7 @@ function distributeOneSharedFile_(file, pathNames, stats) {
   var sourceId = file.getId();
   if (wasCopiedBefore_(sourceId, rootId, entityFolder.getId())) {
     stats.skip++;
+    Logger.log("SKIP (sudah pernah disalin): " + file.getName());
     return;
   }
   var destName = entityCopyFileName_(file, parsed, entityFolder);
@@ -361,34 +367,185 @@ function distributeOneSharedFile_(file, pathNames, stats) {
   stats.ok++;
 }
 
-function inferFromArchivePath_(pathNames, fileName) {
+function normalizeEntityLabel_(raw) {
+  var entityLabel = String(raw || "").trim();
+  if (!entityLabel) return "";
+  if (/^gbc$/i.test(entityLabel)) return "GBC";
+  if (/^kediri$/i.test(entityLabel)) return "Kediri";
+  if (/cv anugrah/i.test(entityLabel)) return "CV Anugerah";
+  if (/cv lembayung/i.test(entityLabel)) return "CV Lembayung";
+  if (/^mjl$/i.test(entityLabel)) return "MJL";
+  if (/^bkt$/i.test(entityLabel)) return "BKT";
+  return entityLabel;
+}
+
+function parseWebAppUploadFileName_(fileName) {
+  var base = String(fileName || "").replace(/\.[^.]+$/i, "");
+  var parts = base.split("_");
+  if (parts.length < 4 || !/^\d{4}-\d{2}-\d{2}$/.test(parts[0])) return null;
+  var seg1 = String(parts[1] || "");
+  if (/^bank$/i.test(seg1)) {
+    return {
+      entityLabel: normalizeEntityLabel_(parts[2]),
+      jenisLabel: "Bank"
+    };
+  }
+  if (/^kas[-_]?kecil$/i.test(seg1.replace(/\s+/g, ""))) {
+    return {
+      entityLabel: normalizeEntityLabel_(parts[2]),
+      jenisLabel: "Kas Kecil"
+    };
+  }
+  return {
+    entityLabel: normalizeEntityLabel_(parts[1]),
+    jenisLabel: ""
+  };
+}
+
+function inferFromArchivePath_(pathNames, fileName, file) {
   var entityLabel = "";
   var jenisLabel = "";
   var i;
   for (i = 0; i < pathNames.length; i++) {
     var p = pathNames[i];
     if (/^BUKTI PENGELUARAN/i.test(p) || /^bukti pengeluaran/i.test(p)) {
-      entityLabel = p.replace(/^BUKTI PENGELUARAN\s+/i, "").replace(/^bukti pengeluaran\s+/i, "");
-      if (/^gbc$/i.test(entityLabel)) entityLabel = "GBC";
-      if (/^kediri$/i.test(entityLabel)) entityLabel = "Kediri";
-      if (/cv anugrah/i.test(entityLabel)) entityLabel = "CV Anugerah";
-      if (/cv lembayung/i.test(entityLabel)) entityLabel = "CV Lembayung";
-      if (/^mjl$/i.test(entityLabel)) entityLabel = "MJL";
-      if (/^bkt$/i.test(entityLabel)) entityLabel = "BKT";
+      entityLabel = normalizeEntityLabel_(
+        p.replace(/^BUKTI PENGELUARAN\s+/i, "").replace(/^bukti pengeluaran\s+/i, "")
+      );
     }
     var j = normalizeJenisFromFolderName_(p);
     if (j) jenisLabel = j;
   }
+  var web = parseWebAppUploadFileName_(fileName);
+  if (web) {
+    if (!entityLabel && web.entityLabel) entityLabel = web.entityLabel;
+    if (!jenisLabel && web.jenisLabel) jenisLabel = web.jenisLabel;
+  }
   if (!entityLabel) {
     var fromName = parseEntityFromFileName_(fileName);
-    if (fromName) entityLabel = fromName;
+    if (fromName) entityLabel = normalizeEntityLabel_(fromName);
   }
   if (!jenisLabel) {
     var j2 = parseJenisFromFileName_(fileName);
     if (j2) jenisLabel = j2;
   }
+  if (!jenisLabel && file) {
+    jenisLabel = inferJenisFromHubByFile_(file, entityLabel);
+  }
   if (!entityLabel || !jenisLabel) return null;
   return { entityLabel: entityLabel, jenisLabel: jenisLabel };
+}
+
+function inferJenisFromHubByFile_(file, entityHint) {
+  var hubId = String(MULTI_DRIVE_CONFIG.HUB_SPREADSHEET_ID || "").trim();
+  if (!hubId) return "";
+  var fileId = file.getId();
+  var fileName = file.getName();
+  var tabs = [
+    { name: MULTI_DRIVE_CONFIG.HUB_TAB_KAS_BESAR || "Bank", jenis: "Bank" },
+    { name: MULTI_DRIVE_CONFIG.HUB_TAB_KAS_KECIL || "KAS KECIL", jenis: "Kas Kecil" }
+  ];
+  try {
+    var ss = SpreadsheetApp.openById(hubId);
+    var t;
+    for (t = 0; t < tabs.length; t++) {
+      var sh = ss.getSheetByName(tabs[t].name);
+      if (!sh) continue;
+      var data = sh.getDataRange().getValues();
+      if (data.length < 2) continue;
+      var headers = data[0];
+      var buktiCol = findHeaderColumnIndex_(headers, /bukti transaksi/i);
+      var entCol = findHeaderColumnIndex_(headers, /entitas pengeluaran/i);
+      var r;
+      for (r = 1; r < data.length; r++) {
+        var bukti = String(buktiCol >= 0 ? data[r][buktiCol] : "");
+        if (bukti.indexOf(fileId) >= 0 || bukti.indexOf(fileName) >= 0) {
+          return tabs[t].jenis;
+        }
+        if (entityHint && entCol >= 0) {
+          var ent = String(data[r][entCol] || "").trim();
+          if (ent && normalizeText_(ent) === normalizeText_(entityHint) && bukti.indexOf(fileId) >= 0) {
+            return tabs[t].jenis;
+          }
+        }
+      }
+    }
+    var legacy = parseLegacyWebAppAmountParts_(fileName);
+    if (legacy && legacy.entityLabel) {
+      for (t = 0; t < tabs.length; t++) {
+        if (hubRowMatchesLegacyParts_(ss, tabs[t].name, legacy)) return tabs[t].jenis;
+      }
+    }
+  } catch (e) {
+    Logger.log("inferJenisFromHub: " + e);
+  }
+  return "";
+}
+
+function findHeaderColumnIndex_(headers, pattern) {
+  var c;
+  for (c = 0; c < headers.length; c++) {
+    var h = String(headers[c] || "");
+    if (pattern.test(h)) return c;
+  }
+  return -1;
+}
+
+function parseLegacyWebAppAmountParts_(fileName) {
+  var base = String(fileName || "").replace(/\.[^.]+$/i, "");
+  var parts = base.split("_");
+  if (parts.length < 4 || !/^\d{4}-\d{2}-\d{2}$/.test(parts[0])) return null;
+  if (/^bank$/i.test(parts[1]) || /^kas[-_]?kecil$/i.test(String(parts[1] || "").replace(/\s+/g, ""))) {
+    return null;
+  }
+  var amount = parts[parts.length - 1];
+  if (!/^\d+$/.test(amount)) return null;
+  return {
+    tanggal: parts[0],
+    entityLabel: normalizeEntityLabel_(parts[1]),
+    amount: amount
+  };
+}
+
+function hubRowMatchesLegacyParts_(ss, tabName, legacy) {
+  var sh = ss.getSheetByName(tabName);
+  if (!sh) return false;
+  var data = sh.getDataRange().getValues();
+  if (data.length < 2) return false;
+  var headers = data[0];
+  var tanggalCol = findHeaderColumnIndex_(headers, /tanggal pengeluaran/i);
+  var entCol = findHeaderColumnIndex_(headers, /entitas pengeluaran/i);
+  var amtCol = findHeaderColumnIndex_(headers, /jumlah pengeluaran|jumlah uang|jumlah\s*\(rp\)/i);
+  var r;
+  for (r = 1; r < data.length; r++) {
+    var ent = entCol >= 0 ? String(data[r][entCol] || "").trim() : "";
+    if (normalizeText_(ent) !== normalizeText_(legacy.entityLabel)) continue;
+    var tanggal = tanggalCol >= 0 ? normalizeDateCell_(data[r][tanggalCol]) : "";
+    if (tanggal && tanggal !== legacy.tanggal) continue;
+    var amtRaw = amtCol >= 0 ? data[r][amtCol] : "";
+    if (!amountsRoughlyMatch_(amtRaw, legacy.amount)) continue;
+    return true;
+  }
+  return false;
+}
+
+function normalizeDateCell_(val) {
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, "Asia/Jakarta", "yyyy-MM-dd");
+  }
+  var s = String(val || "").trim();
+  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[1] + "-" + iso[2] + "-" + iso[3];
+  return s;
+}
+
+function amountsRoughlyMatch_(sheetVal, fileAmount) {
+  var digitsSheet = String(sheetVal ?? "").replace(/[^\d]/g, "");
+  var digitsFile = String(fileAmount ?? "").replace(/[^\d]/g, "");
+  if (!digitsFile) return false;
+  if (digitsSheet === digitsFile) return true;
+  if (digitsSheet.slice(-digitsFile.length) === digitsFile) return true;
+  return false;
 }
 
 function normalizeJenisFromFolderName_(name) {
@@ -399,6 +556,8 @@ function normalizeJenisFromFolderName_(name) {
 }
 
 function parseEntityFromFileName_(fileName) {
+  var web = parseWebAppUploadFileName_(fileName);
+  if (web && web.entityLabel) return web.entityLabel;
   var s = String(fileName);
   var std = s.match(/^\d{4}-\d{2}-\d{2}_([^_]+)_/i);
   if (std) return std[1];
