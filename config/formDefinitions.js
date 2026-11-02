@@ -64,6 +64,8 @@ const SUMBER_DANA_KAS_KECIL = [
   "Kas CV Anugerah — 110119",
   "Kas Dimas Boris — 110127",
   "Kas Eddy — 110122",
+  "Kas GBC — 110124",
+  "Kas Kediri — 110125",
   "Kas Kecil BKT — 110102",
   "Kas MJL — 110116",
   "Kas Matraman — 110105",

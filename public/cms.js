@@ -365,6 +365,33 @@ function userCanSubmitKind(kind) {
   return false;
 }
 
+/** Hubungkan Drive OAuth hanya untuk admin — bukan login member. */
+function canConnectDriveOAuth() {
+  const r = state.user?.role;
+  return r === "admin" || r === "super_admin";
+}
+
+function buktiUploadNoteForForm() {
+  if (state.driveUploadReady) {
+    return "Unggah kuitansi/invoice (PDF, foto). Maks. 5 file × 10 MB.";
+  }
+  if (!canConnectDriveOAuth()) {
+    return "Upload foto lewat form sedang tidak aktif (admin sedang mengatur server). Upload bukti ke Google Drive, lalu tempel link di kolom bukti di bawah.";
+  }
+  return (
+    state.driveUploadHint ||
+    "Upload otomatis tidak aktif — hubungkan Google Drive (admin) atau tempel link bukti manual."
+  );
+}
+
+function buktiManualLinkHintForForm() {
+  if (state.driveUploadReady) return "";
+  if (!canConnectDriveOAuth()) {
+    return "Tempel link file bukti yang sudah di-upload ke Drive (contoh: https://drive.google.com/file/d/…/view).";
+  }
+  return "Sementara upload otomatis belum aktif, tempel link file yang sudah di-upload manual.";
+}
+
 function kasNavGroup(kind) {
   const isBesar = kind === "kas_besar";
   const role = state.user?.role;
@@ -775,10 +802,8 @@ function renderKasPage(root, kind, layout = "form") {
   const namaHint = isBesar
     ? "Contoh: Pembelian ATK, pembayaran tagihan listrik, pembayaran ekspedisi."
     : "Contoh: Pembelian perlengkapan kantor, biaya parkir, kebutuhan operasional.";
-  const uploadNote = state.driveUploadReady
-    ? "Unggah kuitansi/invoice (PDF, foto). Maks. 5 file × 10 MB."
-    : (state.driveUploadHint ||
-      "Upload otomatis tidak aktif — upload bukti manual ke folder Drive, lalu tempel link di bawah.");
+  const uploadNote = buktiUploadNoteForForm();
+  const buktiManualHint = buktiManualLinkHintForForm();
 
   root.innerHTML = `
     <div class="page-heading"><small>${isBesar ? "BANK" : "PETTY CASH"}</small><h1>${escapeHtml(title)}</h1>
@@ -832,14 +857,14 @@ function renderKasPage(root, kind, layout = "form") {
               : `<div class="bukti-link-panel inline-message">
             <b>9. Bukti Transaksi</b> — ${escapeHtml(uploadNote)}
             ${
-              canSubmit && state.driveUpload?.oauthConnectUrl
-                ? `<p style="margin:12px 0 0"><a class="btn btn-primary" href="${state.driveUpload.oauthConnectUrl}">Hubungkan Google Drive (sekali, admin/superadmin)</a></p>`
+              canSubmit && canConnectDriveOAuth() && state.driveUpload?.oauthConnectUrl
+                ? `<p style="margin:12px 0 0"><a class="btn btn-primary" href="${state.driveUpload.oauthConnectUrl}">Hubungkan Google Drive (sekali, admin)</a></p>`
                 : ""
             }
           </div>
           <label>Link bukti transaksi <span class="req">*</span>
             <input type="url" name="bukti" placeholder="https://drive.google.com/file/d/…/view" required ${dis}>
-            <span class="form-hint">Sementara OAuth belum aktif, tempel link file yang sudah di-upload manual.</span>
+            <span class="form-hint">${escapeHtml(buktiManualHint)}</span>
           </label>`
           }
           <label>10. Nama PIC <span class="req">*</span>

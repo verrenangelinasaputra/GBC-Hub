@@ -400,10 +400,10 @@ function buildSummary_(rows, prevRows) {
 
   const byEntity = groupSum_(rows, r => r.entitas);
   const byCategory = groupSum_(rows, r => r.category)
-    .sort((a, b) => b.amount - a.amount)
+    .sort((a, b) => b.total - a.total)
     .slice(0, WEEKLY_RECAP_CONFIG.TOP_CATEGORIES);
   const byPic = groupSum_(rows, r => r.pic)
-    .sort((a, b) => b.amount - a.amount)
+    .sort((a, b) => b.total - a.total)
     .slice(0, WEEKLY_RECAP_CONFIG.TOP_PIC);
 
   const largest = rows.slice().sort((a, b) => b.amount - a.amount)[0] || null;
@@ -457,7 +457,14 @@ function groupSum_(rows, keyFn) {
   });
   return Object.keys(map).map(k => {
     const v = map[k];
-    return { name: k, total: v.amount, count: v.count, bank: v.bank, kecil: v.kecil };
+    return {
+      name: k,
+      total: v.amount,
+      amount: v.amount,
+      count: v.count,
+      bank: v.bank,
+      kecil: v.kecil
+    };
   });
 }
 
@@ -491,7 +498,7 @@ function buildWeeklyRecapHtml_(range, prevRange, summary, rows) {
         "</td><td>" +
         esc_(c.name) +
         "</td><td align=\"right\">" +
-        formatRp_(c.amount) +
+        formatRp_(c.total) +
         "</td><td align=\"center\">" +
         c.count +
         "</td></tr>"
@@ -506,15 +513,17 @@ function buildWeeklyRecapHtml_(range, prevRange, summary, rows) {
         "</td><td>" +
         esc_(p.name) +
         "</td><td align=\"right\">" +
-        formatRp_(p.amount) +
+        formatRp_(p.total) +
         "</td></tr>"
     )
     .join("");
 
-  const detail = rows
+  const detailRows = rows
     .slice()
     .sort((a, b) => String(b.dateIso).localeCompare(String(a.dateIso)))
-    .slice(0, cfg.MAX_DETAIL_ROWS)
+    .slice(0, cfg.MAX_DETAIL_ROWS);
+
+  const detail = detailRows
     .map(
       r =>
         "<tr><td>" +
@@ -532,10 +541,12 @@ function buildWeeklyRecapHtml_(range, prevRange, summary, rows) {
         "</td><td>" +
         esc_(r.pic) +
         "</td><td>" +
-        (r.bukti ? "<a href=\"" + escAttr_(r.bukti) + "\">Bukti</a>" : "—") +
+        (r.bukti ? "<a href=\"" + escAttr_(firstBuktiUrl_(r.bukti)) + "\">Bukti</a>" : "—") +
         "</td></tr>"
     )
     .join("");
+
+  const detailCards = detailRows.map(r => buildDetailCardHtml_(r)).join("");
 
   const highlight = summary.largest
     ? "<p style=\"margin:12px 0;padding:12px;background:#f0f4ff;border-radius:8px;font-size:14px\"><b>Transaksi terbesar:</b> " +
@@ -549,74 +560,182 @@ function buildWeeklyRecapHtml_(range, prevRange, summary, rows) {
       ")</p>"
     : "";
 
+  const styles = weeklyRecapEmailStyles_();
+
   return (
-    "<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body style=\"font-family:Segoe UI,Helvetica,Arial,sans-serif;background:#f4f6fb;margin:0;padding:24px;color:#18243b\">" +
-    "<div style=\"max-width:640px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(24,36,59,.08)\">" +
-    "<div style=\"background:linear-gradient(135deg,#172554,#3458d4);color:#fff;padding:24px 28px\">" +
-    "<div style=\"font-size:12px;opacity:.85;letter-spacing:.5px\">GBC CASH MANAGEMENT</div>" +
-    "<h1 style=\"margin:8px 0 4px;font-size:22px\">Weekly Recap</h1>" +
-    "<p style=\"margin:0;font-size:14px;opacity:.95\">Minggu ke-" +
+    "<!DOCTYPE html><html><head><meta charset=\"utf-8\">" +
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+    "<meta name=\"x-apple-disable-message-reformatting\">" +
+    styles +
+    "</head><body class=\"email-body\">" +
+    "<div class=\"email-wrap\">" +
+    "<div class=\"email-card\">" +
+    "<div class=\"email-hero\">" +
+    "<div class=\"email-eyebrow\">GBC CASH MANAGEMENT</div>" +
+    "<h1 class=\"email-title\">Weekly Recap</h1>" +
+    "<p class=\"email-sub\">Minggu ke-" +
     range.weekNumber +
     " · " +
     esc_(range.label) +
     "</p></div>" +
-    "<div style=\"padding:24px 28px\">" +
-    "<p style=\"font-size:13px;color:#6f7c93;margin:0 0 16px\">Berdasarkan <b>Tanggal Pengeluaran</b> (bukan waktu upload). Periode sebelumnya: " +
+    "<div class=\"email-body-inner\">" +
+    "<p class=\"email-note\">Berdasarkan <b>Tanggal Pengeluaran</b> (bukan waktu upload). Periode sebelumnya: " +
     esc_(prevRange.label) +
     ".</p>" +
-    "<table width=\"100%\" cellpadding=\"0\" cellspacing=\"8\" style=\"margin-bottom:20px\"><tr>" +
-    metricCell_("Total minggu ini", formatRp_(summary.combined.total), deltaStr) +
-    metricCell_("Bank", formatRp_(summary.combined.bank), summary.combined.bankN + " trx") +
-    metricCell_("Kas Kecil", formatRp_(summary.combined.kecil), summary.combined.kecilN + " trx") +
-    "</tr></table>" +
+    "<div class=\"metric-stack\">" +
+    metricBlock_("Total minggu ini", formatRp_(summary.combined.total), deltaStr) +
+    metricBlock_("Bank", formatRp_(summary.combined.bank), summary.combined.bankN + " trx") +
+    metricBlock_("Kas Kecil", formatRp_(summary.combined.kecil), summary.combined.kecilN + " trx") +
+    "</div>" +
     highlight +
-    "<h2 style=\"font-size:16px;margin:24px 0 8px\">Per entitas</h2>" +
-    "<table width=\"100%\" cellpadding=\"8\" cellspacing=\"0\" style=\"border-collapse:collapse;font-size:13px;border:1px solid #e7ebf3\">" +
-    "<thead><tr style=\"background:#f7f8fc\"><th align=\"left\">Entitas</th><th align=\"right\">Bank</th><th align=\"right\">Kas Kecil</th><th align=\"right\">Total</th><th>#</th></tr></thead>" +
-    "<tbody>" +
-    (entityRows || "<tr><td colspan=\"5\">Tidak ada transaksi minggu ini.</td></tr>") +
-    "</tbody></table>" +
-    "<h2 style=\"font-size:16px;margin:24px 0 8px\">Top kategori</h2>" +
-    "<table width=\"100%\" cellpadding=\"8\" cellspacing=\"0\" style=\"border-collapse:collapse;font-size:13px;border:1px solid #e7ebf3\">" +
-    "<thead><tr style=\"background:#f7f8fc\"><th>#</th><th align=\"left\">Kategori</th><th align=\"right\">Nominal</th><th># trx</th></tr></thead><tbody>" +
-    (catRows || "<tr><td colspan=\"4\">—</td></tr>") +
-    "</tbody></table>" +
-    "<h2 style=\"font-size:16px;margin:24px 0 8px\">Top PIC</h2>" +
-    "<table width=\"100%\" cellpadding=\"8\" cellspacing=\"0\" style=\"border-collapse:collapse;font-size:13px;border:1px solid #e7ebf3\">" +
-    "<thead><tr style=\"background:#f7f8fc\"><th>#</th><th align=\"left\">PIC</th><th align=\"right\">Nominal</th></tr></thead><tbody>" +
-    (picRows || "<tr><td colspan=\"3\">—</td></tr>") +
-    "</tbody></table>" +
-    "<h2 style=\"font-size:16px;margin:24px 0 8px\">Detail (max " +
-    cfg.MAX_DETAIL_ROWS +
-    ")</h2>" +
-    "<table width=\"100%\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;font-size:12px;border:1px solid #e7ebf3\">" +
-    "<thead><tr style=\"background:#f7f8fc\"><th>Tanggal</th><th>Jenis</th><th>Entitas</th><th>Kategori</th><th>Nama</th><th align=\"right\">Jumlah</th><th>PIC</th><th>Bukti</th></tr></thead><tbody>" +
-    (detail || "<tr><td colspan=\"8\">Tidak ada data.</td></tr>") +
-    "</tbody></table>" +
-    "<p style=\"margin:24px 0 0;font-size:13px\">" +
+    sectionHeading_("Per entitas") +
+    scrollTableWrap_(
+      "<table class=\"data-table\"><thead><tr><th align=\"left\">Entitas</th><th align=\"right\">Bank</th><th align=\"right\">Kas Kecil</th><th align=\"right\">Total</th><th>#</th></tr></thead><tbody>" +
+        (entityRows || "<tr><td colspan=\"5\">Tidak ada transaksi minggu ini.</td></tr>") +
+        "</tbody></table>"
+    ) +
+    sectionHeading_("Top kategori") +
+    scrollTableWrap_(
+      "<table class=\"data-table\"><thead><tr><th>#</th><th align=\"left\">Kategori</th><th align=\"right\">Nominal</th><th># trx</th></tr></thead><tbody>" +
+        (catRows || "<tr><td colspan=\"4\">—</td></tr>") +
+        "</tbody></table>"
+    ) +
+    sectionHeading_("Top PIC") +
+    scrollTableWrap_(
+      "<table class=\"data-table data-table-pic\"><thead><tr><th>#</th><th align=\"left\">PIC</th><th align=\"right\">Nominal</th></tr></thead><tbody>" +
+        (picRows || "<tr><td colspan=\"3\">—</td></tr>") +
+        "</tbody></table>"
+    ) +
+    sectionHeading_("Detail (max " + cfg.MAX_DETAIL_ROWS + ")") +
+    "<div class=\"detail-desktop\">" +
+    scrollTableWrap_(
+      "<table class=\"data-table data-table-detail\"><thead><tr><th>Tanggal</th><th>Jenis</th><th>Entitas</th><th>Kategori</th><th>Nama</th><th align=\"right\">Jumlah</th><th>PIC</th><th>Bukti</th></tr></thead><tbody>" +
+        (detail || "<tr><td colspan=\"8\">Tidak ada data.</td></tr>") +
+        "</tbody></table>"
+    ) +
+    "</div>" +
+    "<div class=\"detail-mobile\">" +
+    (detailCards || "<p class=\"empty\">Tidak ada data.</p>") +
+    "</div>" +
+    "<p class=\"email-links\">" +
     "<a href=\"" +
     escAttr_(cfg.HUB_URL) +
-    "\" style=\"color:#3458d4\">Buka spreadsheet hub</a>" +
-    (cfg.APP_URL ? " · <a href=\"" + escAttr_(cfg.APP_URL) + "\" style=\"color:#3458d4\">Web app</a>" : "") +
-    "</p></div></div>" +
-    "<p style=\"text-align:center;font-size:11px;color:#8792a6;margin-top:16px\">Email otomatis · " +
+    "\">Buka spreadsheet hub</a>" +
+    (cfg.APP_URL ? " · <a href=\"" + escAttr_(cfg.APP_URL) + "\">Web app</a>" : "") +
+    "</p></div></div></div>" +
+    "<p class=\"email-footer\">Email otomatis · " +
     esc_(Utilities.formatDate(new Date(), cfg.TIMEZONE, "dd MMM yyyy HH:mm z")) +
     "</p></body></html>"
   );
 }
 
-function metricCell_(label, value, sub) {
+function weeklyRecapEmailStyles_() {
   return (
-    "<td width=\"33%\" style=\"background:#f7f8fc;border-radius:8px;padding:14px;vertical-align:top\">" +
-    "<div style=\"font-size:11px;color:#8792a6;text-transform:uppercase\">" +
+    "<style>" +
+    "body.email-body{margin:0;padding:0;background:#f4f6fb;color:#18243b;-webkit-text-size-adjust:100%;}" +
+    ".email-wrap{max-width:640px;margin:0 auto;padding:12px 10px 20px;font-family:Segoe UI,Helvetica,Arial,sans-serif;}" +
+    ".email-card{background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(24,36,59,.08);}" +
+    ".email-hero{background:linear-gradient(135deg,#172554,#3458d4);color:#fff;padding:20px 18px;}" +
+    ".email-eyebrow{font-size:11px;opacity:.85;letter-spacing:.5px;}" +
+    ".email-title{margin:8px 0 4px;font-size:21px;line-height:1.25;}" +
+    ".email-sub{margin:0;font-size:14px;opacity:.95;line-height:1.45;}" +
+    ".email-body-inner{padding:18px 16px 20px;}" +
+    ".email-note{font-size:13px;color:#6f7c93;margin:0 0 16px;line-height:1.55;}" +
+    ".metric-stack{display:block;margin-bottom:16px;}" +
+    ".metric-block{background:#f7f8fc;border-radius:10px;padding:14px 16px;margin:0 0 10px;}" +
+    ".metric-label{font-size:11px;color:#8792a6;text-transform:uppercase;}" +
+    ".metric-value{font-size:20px;font-weight:700;margin:4px 0;line-height:1.2;}" +
+    ".metric-sub{font-size:12px;color:#53617a;line-height:1.4;}" +
+    ".section-h2{font-size:16px;margin:22px 0 8px;line-height:1.3;}" +
+    ".table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%;margin-bottom:4px;border:1px solid #e7ebf3;border-radius:8px;}" +
+    ".data-table{border-collapse:collapse;font-size:13px;min-width:100%;width:max-content;max-width:none;}" +
+    ".data-table th,.data-table td{padding:10px 12px;border-bottom:1px solid #edf0f6;vertical-align:top;}" +
+    ".data-table thead th{background:#f7f8fc;font-size:11px;white-space:nowrap;}" +
+    ".data-table tbody td{word-break:break-word;max-width:220px;}" +
+    ".data-table-pic{min-width:280px;width:100%;}" +
+    ".data-table-detail{min-width:720px;}" +
+    ".detail-mobile{display:none;}" +
+    ".detail-card{border:1px solid #e7ebf3;border-radius:10px;padding:12px 14px;margin:0 0 10px;background:#fafbfe;font-size:13px;line-height:1.5;}" +
+    ".detail-card b{display:block;color:#34415a;margin-bottom:6px;}" +
+    ".detail-row{display:flex;justify-content:space-between;gap:10px;margin:4px 0;}" +
+    ".detail-row span:first-child{color:#8792a6;flex-shrink:0;}" +
+    ".detail-row span:last-child{text-align:right;word-break:break-word;}" +
+    ".email-links{margin:20px 0 0;font-size:14px;line-height:1.6;}" +
+    ".email-links a{color:#3458d4;}" +
+    ".email-footer{text-align:center;font-size:11px;color:#8792a6;margin:12px 8px 0;}" +
+    ".empty{color:#8792a6;font-size:13px;}" +
+    "@media only screen and (max-width:620px){" +
+    ".email-wrap{padding:8px 6px 16px;}" +
+    ".email-body-inner{padding:14px 12px 16px;}" +
+    ".data-table{font-size:12px;}" +
+    ".detail-desktop{display:none!important;}" +
+    ".detail-mobile{display:block!important;}" +
+    "}" +
+    "</style>"
+  );
+}
+
+function metricBlock_(label, value, sub) {
+  return (
+    "<div class=\"metric-block\">" +
+    "<div class=\"metric-label\">" +
     esc_(label) +
     "</div>" +
-    "<div style=\"font-size:18px;font-weight:700;margin:4px 0\">" +
+    "<div class=\"metric-value\">" +
     esc_(value) +
     "</div>" +
-    "<div style=\"font-size:12px;color:#53617a\">" +
+    "<div class=\"metric-sub\">" +
     esc_(sub) +
-    "</div></td>"
+    "</div></div>"
+  );
+}
+
+function sectionHeading_(title) {
+  return "<h2 class=\"section-h2\">" + esc_(title) + "</h2>";
+}
+
+function scrollTableWrap_(tableHtml) {
+  return "<div class=\"table-scroll\">" + tableHtml + "</div>";
+}
+
+function firstBuktiUrl_(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const line = s.split(/[\r\n]+/)[0].trim();
+  const m = line.match(/https?:\/\/[^\s,]+/i);
+  if (m) return m[0];
+  return line;
+}
+
+function buildDetailCardHtml_(r) {
+  const bukti = r.bukti
+    ? "<a href=\"" + escAttr_(firstBuktiUrl_(r.bukti)) + "\">Buka bukti</a>"
+    : "—";
+  return (
+    "<div class=\"detail-card\">" +
+    "<b>" +
+    esc_(r.namaTransaksi) +
+    " · " +
+    esc_(formatRp_(r.amount)) +
+    "</b>" +
+    detailCardRow_("Tanggal", r.tanggal || r.dateIso) +
+    detailCardRow_("Jenis", r.jenis) +
+    detailCardRow_("Entitas", r.entitas) +
+    detailCardRow_("Kategori", r.category) +
+    detailCardRow_("PIC", r.pic) +
+    "<div class=\"detail-row\"><span>Bukti</span><span>" +
+    bukti +
+    "</span></div></div>"
+  );
+}
+
+function detailCardRow_(label, value) {
+  return (
+    "<div class=\"detail-row\"><span>" +
+    esc_(label) +
+    "</span><span>" +
+    esc_(value || "—") +
+    "</span></div>"
   );
 }
 
@@ -666,12 +785,15 @@ function parseDateIso_(raw) {
 }
 
 function parseMoney_(v) {
+  if (v instanceof Date) return 0;
   if (typeof v === "number" && !isNaN(v)) return v;
-  const s = String(v || "")
-    .replace(/[^\d,-]/g, "")
-    .replace(/\./g, "")
+  const s = String(v || "").trim();
+  if (!s) return 0;
+  const cleaned = s
+    .replace(/[^\d,.-]/g, "")
+    .replace(/\.(?=\d{3}(\D|$))/g, "")
     .replace(",", ".");
-  const n = parseFloat(s);
+  const n = parseFloat(cleaned);
   return isNaN(n) ? 0 : n;
 }
 
