@@ -628,6 +628,12 @@ function routeInfo() {
   if (p.includes("/owner/dashboard")) return { view: "dashboard", kind: null, title: "Dashboard Owner" };
   if (p.includes("/admin/user-access")) return { view: "userAccess", kind: null, title: "User Access" };
   if (p.includes("/member/welcome")) return { view: "memberWelcome", kind: null, title: "Selamat datang" };
+  if (p.includes("/kas-besar/revisi")) {
+    return { view: "kas", kind: "kas_besar", layout: "revisi", title: "Bank — Revisi data" };
+  }
+  if (p.includes("/kas-kecil/revisi")) {
+    return { view: "kas", kind: "kas_kecil", layout: "revisi", title: "Kas Kecil — Revisi data" };
+  }
   if (p.includes("/kas-besar/history")) {
     return { view: "kas", kind: "kas_besar", layout: "history", title: "Bank — History data" };
   }
@@ -668,6 +674,12 @@ function userCanSubmitKind(kind) {
     return isBesar ? !!state.permissions?.submitKasBesar : !!state.permissions?.submitKasKecil;
   }
   return false;
+}
+
+function userCanEditKind(kind) {
+  const isBesar = kind === "kas_besar";
+  if (isBesar) return !!state.permissions?.editKasBesar;
+  return !!state.permissions?.editKasKecil;
 }
 
 /** Hubungkan Drive OAuth hanya untuk admin — bukan login member. */
@@ -711,6 +723,9 @@ function kasNavGroup(kind) {
     children.push({ href: `${base}/form`, label: "Form" });
   }
   children.push({ href: `${base}/history`, label: "History data" });
+  if (userCanEditKind(kind)) {
+    children.push({ href: `${base}/revisi`, label: "Revisi data" });
+  }
   children.push({ href: `${base}/dashboard`, label: "Dashboard" });
   return {
     group: isBesar ? "kas-besar" : "kas-kecil",
@@ -1193,8 +1208,132 @@ function bindSearchCombo(box, initialOptions, hooks = {}) {
   return { setOptions, choose, clear, input, hidden };
 }
 
+async function openRevisiRowModal(ctx) {
+  const rowNo = ctx.row?._rowNumber;
+  if (!rowNo) return;
+  document.getElementById("revisiModal")?.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "revisiModal";
+  overlay.className = "confirm-modal-overlay";
+  overlay.innerHTML = `<div class="confirm-modal revisi-modal" role="dialog" aria-modal="true">
+    <h2>Revisi baris #${escapeHtml(String(rowNo))}</h2>
+    <p class="confirm-modal-note">Semua kolom dapat diubah. Setelah simpan, spreadsheet dan nama file bukti di Drive diperbarui.</p>
+    <form class="form-grid" id="revisiForm" enctype="multipart/form-data" novalidate>
+      <label>Tanggal Pengeluaran <span class="req">*</span><input type="date" name="tanggal" required></label>
+      <label>Entitas <span class="req">*</span><select name="entitas" required>${formSelectOptions(ctx.entities, "—")}</select></label>
+      <label>Kategori <span class="req">*</span>
+        <div class="combo" id="revisiCategoryCombo">
+          <input type="text" class="combo-input" placeholder="Cari kategori…" autocomplete="off" required>
+          <input type="hidden" class="combo-value" name="category">
+          <ul class="combo-menu hidden" role="listbox"></ul>
+        </div>
+      </label>
+      <label id="revisiOtherLabel" class="hidden">Beban apa? <span class="req">*</span><input type="text" name="categoryOther" maxlength="120"></label>
+      <label>Nama Transaksi <span class="req">*</span><input type="text" name="namaTransaksi" required maxlength="200"></label>
+      <label>Jumlah (Rp) <span class="req">*</span><input type="text" name="amount" inputmode="numeric" required></label>
+      <label>Keterangan<textarea name="keterangan" rows="2"></textarea></label>
+      <label>Dibayarkan kepada <span class="req">*</span><input type="text" name="dibayarkan" required></label>
+      <label>${ctx.isBesar ? "Sumber Dana Bank" : "Sumber Dana Kas Kecil"} <span class="req">*</span>
+        <select name="sumberDana" required>${formSelectOptions(ctx.sumberList, "—")}</select>
+      </label>
+      <label>Link bukti (satu atau banyak baris)
+        <textarea name="bukti" rows="2" placeholder="https://drive.google.com/file/d/…"></textarea>
+      </label>
+      ${
+        state.driveUploadReady
+          ? `<label>Tambah file bukti baru<input type="file" name="buktiFiles" accept="image/*,application/pdf" multiple></label>`
+          : ""
+      }
+      <label>Nama PIC <span class="req">*</span><input type="text" name="pic" required></label>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Simpan revisi</button>
+        <button type="button" class="btn btn-soft" data-close>Batal</button>
+      </div>
+    </form>
+    <div id="revisiFormMsg" class="inline-message hidden"></div>
+  </div>`;
+  document.body.append(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", e => {
+    if (e.target === overlay || e.target.closest("[data-close]")) close();
+  });
+  const form = overlay.querySelector("#revisiForm");
+  const msg = overlay.querySelector("#revisiFormMsg");
+  const otherLabel = overlay.querySelector("#revisiOtherLabel");
+  const otherInput = overlay.querySelector('[name="categoryOther"]');
+  const syncOther = val => {
+    const on = val === OTHER_CATEGORY;
+    otherLabel?.classList.toggle("hidden", !on);
+    if (otherInput) otherInput.required = on;
+  };
+  const combo = bindSearchCombo(overlay.querySelector("#revisiCategoryCombo"), ctx.cats, {
+    onCommit: syncOther
+  });
+  let payload;
+  try {
+    const data = await api(`${ctx.apiBase}/${rowNo}`);
+    payload = data.payload || {};
+  } catch (e) {
+    toast(e.message || "Gagal memuat baris.");
+    close();
+    return;
+  }
+  form.querySelector('[name="tanggal"]').value = payload.tanggal || ctx.row._date || "";
+  form.querySelector('[name="entitas"]').value = payload.entitas || "";
+  const cat = payload.category || "";
+  if (/^Beban lainnya/i.test(cat)) {
+    combo.choose(OTHER_CATEGORY);
+    if (otherInput) otherInput.value = payload.categoryOther || cat.replace(/^Beban lainnya\s*[—–-]\s*/i, "");
+  } else {
+    combo.choose(cat);
+  }
+  form.querySelector('[name="namaTransaksi"]').value = payload.namaTransaksi || "";
+  form.querySelector('[name="amount"]').value = payload.amount ?? "";
+  form.querySelector('[name="keterangan"]').value = payload.keterangan || "";
+  form.querySelector('[name="dibayarkan"]').value = payload.dibayarkan || "";
+  form.querySelector('[name="sumberDana"]').value = payload.sumberDana || "";
+  form.querySelector('[name="bukti"]').value = payload.bukti || "";
+  form.querySelector('[name="pic"]').value = payload.pic || state.user?.display_name || "";
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
+    const picked = fieldVal(form, "category");
+    const fd = new FormData(form);
+    if (picked === OTHER_CATEGORY) {
+      fd.set("category", OTHER_CATEGORY);
+    }
+    msg.className = "inline-message";
+    msg.textContent = "Menyimpan revisi…";
+    msg.classList.remove("hidden");
+    try {
+      const data = await api(`${ctx.apiBase}/${rowNo}`, {
+        method: "PATCH",
+        body: fd,
+        progressLabel: "Menyimpan revisi & Drive…"
+      });
+      toast(data.message || "Revisi tersimpan.");
+      close();
+      ctx.onDone?.();
+    } catch (err) {
+      msg.className = "inline-message error";
+      msg.textContent = err.message;
+    }
+  });
+}
+
 function renderKasPage(root, kind, layout = "form") {
   const isBesar = kind === "kas_besar";
+  const isRevisi = layout === "revisi";
+  if (isRevisi && !userCanEditKind(kind)) {
+    const base = kasMenuBasePath(kind);
+    if (base) {
+      window.location.replace(`${base}/history`);
+      return;
+    }
+  }
   if (layout === "form" && !userCanSubmitKind(kind)) {
     const base = kasMenuBasePath(kind);
     if (base) {
@@ -1203,14 +1342,18 @@ function renderKasPage(root, kind, layout = "form") {
     }
   }
   const showForm = layout === "form";
-  const showHistory = layout === "history";
+  const showHistory = layout === "history" || isRevisi;
   const title = isBesar
-    ? layout === "history"
-      ? "Bank — History data"
-      : "Bank — Form"
-    : layout === "history"
-      ? "Kas Kecil — History data"
-      : "Kas Kecil — Form";
+    ? isRevisi
+      ? "Bank — Revisi data"
+      : layout === "history"
+        ? "Bank — History data"
+        : "Bank — Form"
+    : isRevisi
+      ? "Kas Kecil — Revisi data"
+      : layout === "history"
+        ? "Kas Kecil — History data"
+        : "Kas Kecil — Form";
   const apiBase = isBesar ? "/api/kas-besar/transactions" : "/api/kas-kecil/transactions";
   const fo = state.formOptions?.[kind] || {};
   const cats = fo.categories?.length ? fo.categories : (isBesar ? state.categories.kasBesar : state.categories.kasKecil);
@@ -1232,7 +1375,11 @@ function renderKasPage(root, kind, layout = "form") {
 
   root.innerHTML = `
     <div class="page-heading"><small>${isBesar ? "BANK" : "PETTY CASH"}</small><h1>${escapeHtml(title)}</h1>
-      <p>${escapeHtml(formSub)} Pastikan data benar dan bukti dilampirkan. Data masuk tab <strong>${escapeHtml(isBesar ? (state.links.kasBesarTab || "Bank") : (state.links.kasKecilTab || "KAS KECIL"))}</strong>.</p>
+      <p>${
+        isRevisi
+          ? "Perbaiki baris yang salah. Perubahan langsung ke spreadsheet; nama file bukti di Drive disesuaikan otomatis (link tidak berubah)."
+          : `${escapeHtml(formSub)} Pastikan data benar dan bukti dilampirkan. Data masuk tab <strong>${escapeHtml(isBesar ? (state.links.kasBesarTab || "Bank") : (state.links.kasKecilTab || "KAS KECIL"))}</strong>.`
+      }</p>
     </div>
     <div class="kas-layout${showHistory && !showForm ? " kas-layout-single" : ""}">
       ${showForm ? `<article class="panel primary-shortcut" id="txFormPanel">
@@ -1350,8 +1497,7 @@ function renderKasPage(root, kind, layout = "form") {
             <select id="tPerPage"><option>10</option><option selected>20</option><option>50</option></select>
           </label>
           <div class="filter-actions">
-            <button class="btn btn-soft" type="button" id="tExportPdf">Export PDF</button>
-            <button class="btn btn-soft" type="button" id="tExportWord">Export Word</button>
+            ${isRevisi ? "" : '<button class="btn btn-soft" type="button" id="tExportPdf">Export PDF</button><button class="btn btn-soft" type="button" id="tExportWord">Export Word</button>'}
             <button class="btn btn-primary" type="button" id="tRefresh">↻ Refresh data</button>
           </div>
         </div>
@@ -1608,7 +1754,7 @@ function renderKasPage(root, kind, layout = "form") {
 
   function renderSheetTable(data) {
     displayHeaders = orderSheetHeaders(data.headers || []);
-    const colSpan = Math.max(displayHeaders.length + 1, 2);
+    const colSpan = Math.max(displayHeaders.length + 1 + (isRevisi ? 1 : 0), 2);
     const head = $("#txHead");
     head.replaceChildren();
     const trh = document.createElement("tr");
@@ -1624,6 +1770,12 @@ function renderKasPage(root, kind, layout = "form") {
       th.title = h;
       trh.append(th);
     });
+    if (isRevisi) {
+      const thAct = document.createElement("th");
+      thAct.className = "sheet-th";
+      thAct.textContent = "Aksi";
+      trh.append(thAct);
+    }
     head.append(trh);
 
     const body = $("#txBody");
@@ -1645,6 +1797,27 @@ function renderKasPage(root, kind, layout = "form") {
           td.title = String(row[h] ?? "").trim();
           tr.append(td);
         });
+        if (isRevisi) {
+          const tdAct = document.createElement("td");
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "btn btn-soft btn-sm";
+          btn.textContent = "Revisi";
+          btn.addEventListener("click", () =>
+            openRevisiRowModal({
+              kind,
+              isBesar,
+              apiBase,
+              row,
+              cats,
+              entities,
+              sumberList,
+              onDone: loadTable
+            })
+          );
+          tdAct.append(btn);
+          tr.append(tdAct);
+        }
         body.append(tr);
       });
     }
@@ -1672,8 +1845,10 @@ function renderKasPage(root, kind, layout = "form") {
 
   let searchTimer;
   onCategoryFilter = applyFilters;
-  $("#tExportPdf").addEventListener("click", () => exportFiltered("pdf"));
-  $("#tExportWord").addEventListener("click", () => exportFiltered("word"));
+  if (!isRevisi) {
+    $("#tExportPdf")?.addEventListener("click", () => exportFiltered("pdf"));
+    $("#tExportWord")?.addEventListener("click", () => exportFiltered("word"));
+  }
   $("#tRefresh").addEventListener("click", hardRefreshTable);
 
   async function exportFiltered(format) {
@@ -2330,15 +2505,15 @@ function renderUserScopePanel(title, prefix, catalog, user) {
 async function renderUserAccess(root) {
   root.innerHTML = `
     <div class="page-heading"><small>ADMIN</small><h1>User Access</h1>
-      <p><strong>Lihat</strong> = History + Dashboard (wajib pilih minimal 1 entitas). <strong>Isi form</strong> = input transaksi (wajib entitas + sumber dana untuk modul itu). Kas Kecil dan Bank diatur terpisah.</p>
+      <p><strong>Lihat</strong> = History + Dashboard. <strong>Isi form</strong> = input baru. <strong>Revisi</strong> = ubah baris + rename bukti Drive (wajib entitas + sumber dana untuk modul itu). Kas Kecil dan Bank diatur terpisah.</p>
     </div>
     <article class="panel">
       <div id="userAccessMsg" class="inline-message" aria-live="polite"></div>
       <div class="table-wrap"><table class="data-table user-access-table"><thead>
         <tr><th rowspan="2">Nama</th><th rowspan="2">Username</th><th rowspan="2">Email</th><th rowspan="2">Telepon</th>
-          <th colspan="2">Kas Kecil</th><th colspan="2">Bank</th><th rowspan="2"></th></tr>
-        <tr><th>Lihat</th><th>Isi form</th><th>Lihat</th><th>Isi form</th></tr>
-      </thead><tbody id="userAccessBody"><tr><td colspan="9">Memuat…</td></tr></tbody></table></div>
+          <th colspan="3">Kas Kecil</th><th colspan="3">Bank</th><th rowspan="2"></th></tr>
+        <tr><th>Lihat</th><th>Isi form</th><th>Revisi</th><th>Lihat</th><th>Isi form</th><th>Revisi</th></tr>
+      </thead><tbody id="userAccessBody"><tr><td colspan="11">Memuat…</td></tr></tbody></table></div>
       <p id="userAccessLink" class="login-foot" style="margin-top:12px"></p>
     </article>`;
   const msg = $("#userAccessMsg");
@@ -2355,7 +2530,7 @@ async function renderUserAccess(root) {
     }
     body.replaceChildren();
     if (!data.users?.length) {
-      body.innerHTML = '<tr><td colspan="9">Belum ada user terdaftar.</td></tr>';
+      body.innerHTML = '<tr><td colspan="11">Belum ada user terdaftar.</td></tr>';
       return;
     }
     for (const u of data.users) {
@@ -2368,8 +2543,10 @@ async function renderUserAccess(root) {
         <td>${escapeHtml(u.phone || "—")}</td>
         <td><input type="checkbox" data-field="access_kas_kecil" ${u.access_kas_kecil ? "checked" : ""} title="History & Dashboard"></td>
         <td><input type="checkbox" data-field="input_kas_kecil" ${u.input_kas_kecil ? "checked" : ""} title="Form input"></td>
+        <td><input type="checkbox" data-field="edit_kas_kecil" ${u.edit_kas_kecil ? "checked" : ""} title="Revisi data"></td>
         <td><input type="checkbox" data-field="access_kas_besar" ${u.access_kas_besar ? "checked" : ""} title="History & Dashboard"></td>
         <td><input type="checkbox" data-field="input_kas_besar" ${u.input_kas_besar ? "checked" : ""} title="Form input"></td>
+        <td><input type="checkbox" data-field="edit_kas_besar" ${u.edit_kas_besar ? "checked" : ""} title="Revisi data"></td>
         <td class="user-access-actions">
           <button type="button" class="btn btn-ghost btn-sm" data-toggle-scope>Entitas &amp; sumber</button>
           <button type="button" class="btn btn-primary btn-sm" data-save>Simpan</button>
@@ -2377,7 +2554,7 @@ async function renderUserAccess(root) {
         </td>`;
       const scopeTr = document.createElement("tr");
       scopeTr.className = "user-access-scopes hidden";
-      scopeTr.innerHTML = `<td colspan="9"><div class="user-scope-grid">
+      scopeTr.innerHTML = `<td colspan="11"><div class="user-scope-grid">
         ${renderUserScopePanel("Kas Kecil", "kk", catalog, u)}
         ${renderUserScopePanel("Bank", "kb", catalog, u)}
       </div></td>`;
@@ -2387,6 +2564,8 @@ async function renderUserAccess(root) {
 
       const inputKk = tr.querySelector('[data-field="input_kas_kecil"]');
       const inputKb = tr.querySelector('[data-field="input_kas_besar"]');
+      const editKk = tr.querySelector('[data-field="edit_kas_kecil"]');
+      const editKb = tr.querySelector('[data-field="edit_kas_besar"]');
       const viewKk = tr.querySelector('[data-field="access_kas_kecil"]');
       const viewKb = tr.querySelector('[data-field="access_kas_besar"]');
       inputKk.addEventListener("change", () => {
@@ -2394,6 +2573,12 @@ async function renderUserAccess(root) {
       });
       inputKb.addEventListener("change", () => {
         if (inputKb.checked) viewKb.checked = true;
+      });
+      editKk.addEventListener("change", () => {
+        if (editKk.checked) viewKk.checked = true;
+      });
+      editKb.addEventListener("change", () => {
+        if (editKb.checked) viewKb.checked = true;
       });
       tr.querySelector("[data-toggle-scope]").addEventListener("click", () => {
         scopeTr.classList.toggle("hidden");
@@ -2412,7 +2597,7 @@ async function renderUserAccess(root) {
           scopeTr.remove();
           toast(del.message || "Akun dihapus.");
           if (!body.querySelector('[data-user-block="1"]')) {
-            body.innerHTML = '<tr><td colspan="9">Belum ada user terdaftar.</td></tr>';
+            body.innerHTML = '<tr><td colspan="11">Belum ada user terdaftar.</td></tr>';
           }
         } catch (e) {
           msg.textContent = e.message;
@@ -2424,6 +2609,8 @@ async function renderUserAccess(root) {
         const input_kas_kecil = inputKk.checked;
         const access_kas_besar = viewKb.checked;
         const input_kas_besar = inputKb.checked;
+        const edit_kas_kecil = editKk.checked;
+        const edit_kas_besar = editKb.checked;
         const scopeRoot = scopeTr;
         try {
           msg.textContent = "";
@@ -2436,6 +2623,8 @@ async function renderUserAccess(root) {
               access_kas_besar,
               input_kas_kecil,
               input_kas_besar,
+              edit_kas_kecil,
+              edit_kas_besar,
               entities_kas_kecil: readScopeGroup(scopeRoot, "kk-entities"),
               sumber_dana_kas_kecil: readScopeGroup(scopeRoot, "kk-sumber"),
               entities_kas_besar: readScopeGroup(scopeRoot, "kb-entities"),
@@ -2447,6 +2636,8 @@ async function renderUserAccess(root) {
           inputKk.checked = !!saved.input_kas_kecil;
           viewKb.checked = !!saved.access_kas_besar;
           inputKb.checked = !!saved.input_kas_besar;
+          editKk.checked = !!saved.edit_kas_kecil;
+          editKb.checked = !!saved.edit_kas_besar;
           toast(savedResp.message || "Akses disimpan.");
         } catch (e) {
           msg.textContent = e.message;
@@ -2456,7 +2647,7 @@ async function renderUserAccess(root) {
       body.append(tr, scopeTr);
     }
   } catch (e) {
-    body.innerHTML = `<tr><td colspan="9">${escapeHtml(e.message)}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="11">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 

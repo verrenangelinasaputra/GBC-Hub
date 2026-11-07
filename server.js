@@ -13,7 +13,9 @@ const {
   requireKasBesarSubmit,
   requireKasKecilSubmit,
   requireKasBesarRead,
-  requireKasKecilRead
+  requireKasKecilRead,
+  requireKasBesarEdit,
+  requireKasKecilEdit
 } = require("./lib/auth");
 const { findUser, verifyPassword, publicUser } = require("./lib/users");
 const { sendMail, verificationEmailText, adminNotifyEmail, newUserNotifyText } = require("./lib/mail");
@@ -41,6 +43,8 @@ const {
   kasBesarRecap,
   superAdminCombinedRecap,
   appendTransaction,
+  updateTransactionRow,
+  getTransactionRow,
   hubSheetMode,
   getHubSpreadsheetId,
   parseMoneyValue,
@@ -52,6 +56,7 @@ const { formOptionsForKind, EXPENSE_CATEGORIES, OTHER_CATEGORY } = require("./co
 const {
   filterFormOptionsForUser,
   validateMemberScopeForSubmit,
+  validateMemberScopeForEdit,
   memberEntities,
   accessCatalogForAdmin,
   isUnrestrictedRole
@@ -63,6 +68,7 @@ const {
   invalidateUploadFolderCache
 } = require("./lib/driveUpload");
 const { fetchDriveBuktiPreview } = require("./lib/driveBuktiExport");
+const { renameBuktiFilesForPayload } = require("./lib/driveBuktiRename");
 const {
   buktiDriveFileName,
   tanggalFromTransactionBody,
@@ -398,6 +404,12 @@ const appPages = [
   "/member/kas-besar/history",
   "/member/kas-besar/dashboard",
   "/member/kas-kecil/dashboard",
+  "/admin/kas-kecil/revisi",
+  "/admin/kas-besar/revisi",
+  "/super-admin/kas-kecil/revisi",
+  "/super-admin/kas-besar/revisi",
+  "/member/kas-kecil/revisi",
+  "/member/kas-besar/revisi",
   "/admin/user-access"
 ];
 for (const route of appPages) {
@@ -788,6 +800,8 @@ app.patch("/api/admin/users/:userId/access", requireAuth, requireCsrf, requireRo
       access_kas_besar: !!req.body?.access_kas_besar,
       input_kas_kecil: !!req.body?.input_kas_kecil,
       input_kas_besar: !!req.body?.input_kas_besar,
+      edit_kas_kecil: !!req.body?.edit_kas_kecil,
+      edit_kas_besar: !!req.body?.edit_kas_besar,
       entities_kas_kecil: req.body?.entities_kas_kecil,
       sumber_dana_kas_kecil: req.body?.sumber_dana_kas_kecil,
       entities_kas_besar: req.body?.entities_kas_besar,
@@ -937,6 +951,127 @@ app.post(
   buktiUpload.array("buktiFiles", 5),
   (req, res) => submitTransaction(req, res, "kas_besar")
 );
+
+async function reviseTransaction(req, res, kind) {
+  const rowNumber = Number(req.params.rowNumber);
+  if (!Number.isFinite(rowNumber) || rowNumber < 2) {
+    return res.status(400).json({ error: "Nomor baris tidak valid." });
+  }
+  const files = req.files || [];
+  const driveUpload = await inspectUploadFolder();
+  let existing;
+  try {
+    existing = await getTransactionRow(kind, rowNumber);
+  } catch (e) {
+    return res.status(e.status || 500).json({ error: e.message || "Baris tidak ditemukan." });
+  }
+  const payload = normalizeTransactionBody(req.body);
+  payload.tanggal = resolveTanggalPengeluaran(payload.tanggal);
+  payload.pic = String(payload.pic || existing.payload.pic || picFromSessionUser(req.user)).trim();
+  const buktiBaseline = payload.bukti || existing.payload.bukti;
+  const validationError = validateTransactionPayload(
+    { ...payload, bukti: buktiBaseline },
+    kind,
+    files,
+    driveUpload.ready
+  );
+  if (validationError) {
+    return res.status(400).json({ error: validationError });
+  }
+  if (payload.category === OTHER_CATEGORY) {
+    payload.category = `${OTHER_CATEGORY} — ${payload.categoryOther}`;
+  }
+  const scopeError = validateMemberScopeForEdit(req.user, kind, payload);
+  if (scopeError) {
+    return res.status(403).json({ error: scopeError });
+  }
+  try {
+    if (files.length) {
+      if (!driveUpload.ready) {
+        return res.status(503).json({ error: "Upload bukti baru tidak tersedia (Drive OAuth belum aktif)." });
+      }
+      const links = await uploadBuktiFiles(files, {
+        nameForFile: (file, index, total) =>
+          buktiDriveFileName(kind, payload, file.originalname, index, total)
+      });
+      const prior = payload.bukti || existing.payload.bukti;
+      payload.bukti = [prior, links.join("\n")].filter(Boolean).join("\n");
+    } else if (!payload.bukti) {
+      payload.bukti = existing.payload.bukti;
+    }
+    const updated = await updateTransactionRow(kind, rowNumber, payload, {
+      revisedBy: picFromSessionUser(req.user)
+    });
+    let driveRename = null;
+    try {
+      driveRename = await renameBuktiFilesForPayload(kind, payload.bukti, payload);
+    } catch (driveErr) {
+      console.error("revisi drive rename:", driveErr.message);
+      driveRename = { renamed: 0, errors: [driveErr.message] };
+    }
+    let compile = null;
+    try {
+      compile = await compileAllRecap();
+    } catch (compileErr) {
+      console.error("compile after revisi:", compileErr.message);
+      compile = { error: compileErr.message };
+    }
+    const renameNote =
+      driveRename?.errors?.length > 0
+        ? ` Spreadsheet sudah diperbarui; beberapa nama file Drive gagal (${driveRename.errors.length}).`
+        : driveRename?.renamed
+          ? ` ${driveRename.renamed} file bukti di Drive di-rename.`
+          : "";
+    res.json({
+      ok: true,
+      message: `Revisi tersimpan (baris ${rowNumber}).${renameNote}`,
+      update: updated,
+      driveRename,
+      compile
+    });
+  } catch (e) {
+    console.error(`${kind} revisi:`, e.message);
+    res.status(e.status || 500).json({ error: e.message || "Gagal menyimpan revisi." });
+  }
+}
+
+app.patch(
+  "/api/kas-kecil/transactions/:rowNumber",
+  requireAuth,
+  attachFreshMember,
+  requireCsrf,
+  requireKasKecilEdit,
+  buktiUpload.array("buktiFiles", 5),
+  (req, res) => reviseTransaction(req, res, "kas_kecil")
+);
+
+app.patch(
+  "/api/kas-besar/transactions/:rowNumber",
+  requireAuth,
+  attachFreshMember,
+  requireCsrf,
+  requireKasBesarEdit,
+  buktiUpload.array("buktiFiles", 5),
+  (req, res) => reviseTransaction(req, res, "kas_besar")
+);
+
+app.get("/api/kas-kecil/transactions/:rowNumber", requireAuth, attachFreshMember, requireKasKecilEdit, async (req, res) => {
+  try {
+    const data = await getTransactionRow("kas_kecil", req.params.rowNumber);
+    res.json({ ok: true, ...data });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || "Gagal memuat baris." });
+  }
+});
+
+app.get("/api/kas-besar/transactions/:rowNumber", requireAuth, attachFreshMember, requireKasBesarEdit, async (req, res) => {
+  try {
+    const data = await getTransactionRow("kas_besar", req.params.rowNumber);
+    res.json({ ok: true, ...data });
+  } catch (e) {
+    res.status(e.status || 500).json({ error: e.message || "Gagal memuat baris." });
+  }
+});
 
 app.post("/api/hub/compile-recap", requireAuth, requireCsrf, requireRoles("super_admin", "owner"), async (req, res) => {
   try {
