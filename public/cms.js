@@ -1212,51 +1212,63 @@ async function openRevisiRowModal(ctx) {
   const rowNo = ctx.row?._rowNumber;
   if (!rowNo) return;
   document.getElementById("revisiModal")?.remove();
+  document.body.classList.remove("confirm-modal-open");
   const overlay = document.createElement("div");
   overlay.id = "revisiModal";
-  overlay.className = "confirm-modal-overlay";
-  overlay.innerHTML = `<div class="confirm-modal revisi-modal" role="dialog" aria-modal="true">
-    <h2>Revisi baris #${escapeHtml(String(rowNo))}</h2>
-    <p class="confirm-modal-note">Semua kolom dapat diubah. Setelah simpan, spreadsheet dan nama file bukti di Drive diperbarui.</p>
-    <form class="form-grid" id="revisiForm" enctype="multipart/form-data" novalidate>
-      <label>Tanggal Pengeluaran <span class="req">*</span><input type="date" name="tanggal" required></label>
-      <label>Entitas <span class="req">*</span><select name="entitas" required>${formSelectOptions(ctx.entities, "—")}</select></label>
-      <label>Kategori <span class="req">*</span>
-        <div class="combo" id="revisiCategoryCombo">
-          <input type="text" class="combo-input" placeholder="Cari kategori…" autocomplete="off" required>
-          <input type="hidden" class="combo-value" name="category">
-          <ul class="combo-menu hidden" role="listbox"></ul>
-        </div>
-      </label>
-      <label id="revisiOtherLabel" class="hidden">Beban apa? <span class="req">*</span><input type="text" name="categoryOther" maxlength="120"></label>
-      <label>Nama Transaksi <span class="req">*</span><input type="text" name="namaTransaksi" required maxlength="200"></label>
-      <label>Jumlah (Rp) <span class="req">*</span><input type="text" name="amount" inputmode="numeric" required></label>
-      <label>Keterangan<textarea name="keterangan" rows="2"></textarea></label>
-      <label>Dibayarkan kepada <span class="req">*</span><input type="text" name="dibayarkan" required></label>
-      <label>${ctx.isBesar ? "Sumber Dana Bank" : "Sumber Dana Kas Kecil"} <span class="req">*</span>
-        <select name="sumberDana" required>${formSelectOptions(ctx.sumberList, "—")}</select>
-      </label>
-      <label>Link bukti (satu atau banyak baris)
-        <textarea name="bukti" rows="2" placeholder="https://drive.google.com/file/d/…"></textarea>
-      </label>
-      ${
-        state.driveUploadReady
-          ? `<label>Tambah file bukti baru<input type="file" name="buktiFiles" accept="image/*,application/pdf" multiple></label>`
-          : ""
-      }
-      <label>Nama PIC <span class="req">*</span><input type="text" name="pic" required></label>
-      <div class="form-actions">
-        <button type="submit" class="btn btn-primary">Simpan revisi</button>
-        <button type="button" class="btn btn-soft" data-close>Batal</button>
+  overlay.className = "confirm-modal";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-labelledby", "revisiModalTitle");
+  overlay.innerHTML = `
+    <button type="button" class="confirm-modal-backdrop" aria-label="Tutup"></button>
+    <div class="confirm-modal-panel revisi-modal-panel">
+      <div class="confirm-modal-head">
+        <span class="confirm-modal-badge">Revisi</span>
+        <h3 id="revisiModalTitle">Revisi baris #${escapeHtml(String(rowNo))}</h3>
+        <p class="confirm-modal-lead">Semua kolom dapat diubah. Setelah simpan, spreadsheet dan nama file bukti di Drive diperbarui.</p>
       </div>
-    </form>
-    <div id="revisiFormMsg" class="inline-message hidden"></div>
-  </div>`;
+      <form class="form-grid revisi-modal-form" id="revisiForm" enctype="multipart/form-data" novalidate>
+        <label>Tanggal Pengeluaran <span class="req">*</span><input type="date" name="tanggal" required></label>
+        <label>Entitas <span class="req">*</span><select name="entitas" required>${formSelectOptions(ctx.entities, "—")}</select></label>
+        <label>Kategori <span class="req">*</span>
+          <div class="combo" id="revisiCategoryCombo">
+            <input type="text" class="combo-input" placeholder="Cari kategori…" autocomplete="off" required>
+            <input type="hidden" class="combo-value" name="category">
+            <ul class="combo-menu hidden" role="listbox"></ul>
+          </div>
+        </label>
+        <label id="revisiOtherLabel" class="hidden">Beban apa? <span class="req">*</span><input type="text" name="categoryOther" maxlength="120"></label>
+        <label>Nama Transaksi <span class="req">*</span><input type="text" name="namaTransaksi" required maxlength="200"></label>
+        <label>Jumlah (Rp) <span class="req">*</span><input type="text" name="amount" inputmode="numeric" required></label>
+        <label>Keterangan<textarea name="keterangan" rows="2"></textarea></label>
+        <label>Dibayarkan kepada <span class="req">*</span><input type="text" name="dibayarkan" required></label>
+        <label>${ctx.isBesar ? "Sumber Dana Bank" : "Sumber Dana Kas Kecil"} <span class="req">*</span>
+          <select name="sumberDana" required>${formSelectOptions(ctx.sumberList, "—")}</select>
+        </label>
+        <label>Link bukti (satu atau banyak baris)
+          <textarea name="bukti" rows="2" placeholder="https://drive.google.com/file/d/…"></textarea>
+        </label>
+        ${
+          state.driveUploadReady
+            ? `<label>Tambah file bukti baru<input type="file" name="buktiFiles" accept="image/*,application/pdf" multiple></label>`
+            : ""
+        }
+        <label>Nama PIC <span class="req">*</span><input type="text" name="pic" required></label>
+      </form>
+      <div id="revisiFormMsg" class="inline-message hidden"></div>
+      <div class="confirm-modal-actions">
+        <button type="button" class="btn btn-soft" data-close>Batal</button>
+        <button type="submit" form="revisiForm" class="btn btn-primary">Simpan revisi</button>
+      </div>
+    </div>`;
   document.body.append(overlay);
-  const close = () => overlay.remove();
-  overlay.addEventListener("click", e => {
-    if (e.target === overlay || e.target.closest("[data-close]")) close();
-  });
+  document.body.classList.add("confirm-modal-open");
+  const close = () => {
+    overlay.remove();
+    document.body.classList.remove("confirm-modal-open");
+  };
+  overlay.querySelector(".confirm-modal-backdrop").addEventListener("click", close);
+  overlay.querySelector("[data-close]").addEventListener("click", close);
   const form = overlay.querySelector("#revisiForm");
   const msg = overlay.querySelector("#revisiFormMsg");
   const otherLabel = overlay.querySelector("#revisiOtherLabel");
