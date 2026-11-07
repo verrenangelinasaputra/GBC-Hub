@@ -18,7 +18,9 @@ const {
 const { findUser, verifyPassword, publicUser } = require("./lib/users");
 const { sendMail, verificationEmailText, adminNotifyEmail, newUserNotifyText } = require("./lib/mail");
 const {
-  findMemberByEmail,
+  findMemberByUsername,
+  findMemberByUserId,
+  normalizeUsername,
   createMemberUser,
   saveAuthCode,
   consumeAuthCode,
@@ -250,8 +252,21 @@ function validatePasswordPair(password, confirm) {
   return "";
 }
 
+function validateUsernameField(raw) {
+  const username = normalizeUsername(raw);
+  if (!username || username.length < 3 || username.length > 32) {
+    return { error: "Username wajib 3–32 karakter." };
+  }
+  if (!/^[a-z0-9._-]+$/.test(username)) {
+    return { error: "Username hanya huruf, angka, titik, strip, dan underscore." };
+  }
+  return { username };
+}
+
 function validateRegisterFields(body) {
   const name = String(body?.name || "").trim();
+  const usernameCheck = validateUsernameField(body?.username);
+  if (usernameCheck.error) return { error: usernameCheck.error };
   const email = normalizeEmail(body?.email);
   const phone = String(body?.phone || "").trim();
   const password = String(body?.password || "");
@@ -261,7 +276,7 @@ function validateRegisterFields(body) {
   if (!phone || phone.length < 8) return { error: "Nomor telepon wajib diisi." };
   const pwErr = validatePasswordPair(password, confirm);
   if (pwErr) return { error: pwErr };
-  return { name, email, phone, password };
+  return { name, username: usernameCheck.username, email, phone, password };
 }
 function requireAuth(req, res, next) {
   const session = sessionFor(req);
@@ -274,21 +289,17 @@ function requireAuth(req, res, next) {
 const MEMBER_FRESH_CACHE_MS = Number(process.env.MEMBER_FRESH_CACHE_MS || 30_000);
 const memberFreshCache = new Map();
 
-function invalidateMemberFreshCache(email) {
-  const key = String(email || "")
-    .trim()
-    .toLowerCase();
+function invalidateMemberFreshCache(userId) {
+  const key = String(userId || "").trim();
   if (key) memberFreshCache.delete(key);
 }
 
-async function findMemberByEmailFresh(email) {
-  const key = String(email || "")
-    .trim()
-    .toLowerCase();
+async function findMemberFreshById(userId) {
+  const key = String(userId || "").trim();
   if (!key) return null;
   const hit = memberFreshCache.get(key);
   if (hit && Date.now() - hit.at < MEMBER_FRESH_CACHE_MS) return hit.user;
-  const user = await findMemberByEmail(key);
+  const user = await findMemberByUserId(key);
   if (user) memberFreshCache.set(key, { at: Date.now(), user });
   return user;
 }
@@ -296,7 +307,7 @@ async function findMemberByEmailFresh(email) {
 async function attachFreshMember(req, res, next) {
   if (req.user?.role !== "member") return next();
   try {
-    const fresh = await findMemberByEmailFresh(req.user.email);
+    const fresh = await findMemberFreshById(req.user.id);
     if (fresh?.email_verified) req.user = publicUser(fresh);
   } catch {
     /* ignore */
@@ -316,7 +327,7 @@ async function requireAuthPage(req, res, next) {
   let user = session.user;
   if (user?.role === "member") {
     try {
-      const fresh = await findMemberByEmailFresh(user.email);
+      const fresh = await findMemberFreshById(user.id);
       if (fresh?.email_verified) user = publicUser(fresh);
     } catch {
       /* keep session user */
@@ -443,7 +454,7 @@ app.get("/api/me", async (req, res) => {
   const drivePromise = cachedDrive ? Promise.resolve(cachedDrive) : inspectUploadFolder();
   const memberPromise =
     user.role === "member"
-      ? findMemberByEmailFresh(user.email).catch(() => null)
+      ? findMemberFreshById(user.id).catch(() => null)
       : Promise.resolve(null);
 
   const [driveUpload, freshMember] = await Promise.all([drivePromise, memberPromise]);
@@ -540,7 +551,7 @@ app.post("/api/auth/login", async (req, res) => {
   const login = String(req.body?.login || "").trim();
   const password = String(req.body?.password || "");
   if (!login || !password) {
-    return res.status(400).json({ error: "Username/email dan password wajib diisi." });
+    return res.status(400).json({ error: "Username dan password wajib diisi." });
   }
   try {
     const user = await findUser(login);
@@ -567,12 +578,12 @@ const pendingRegister = new Map();
 const AUTH_CODE_RESEND_MS = Number(process.env.AUTH_CODE_RESEND_MS || 60_000);
 const authCodeLastSent = new Map();
 
-function authCodeSentKey(email, purpose) {
-  return `${purpose}:${normalizeEmail(email)}`;
+function authCodeSentKey(loginKey, purpose) {
+  return `${purpose}:${normalizeUsername(loginKey)}`;
 }
 
-function resendCooldownError(email, purpose) {
-  const key = authCodeSentKey(email, purpose);
+function resendCooldownError(loginKey, purpose) {
+  const key = authCodeSentKey(loginKey, purpose);
   const last = authCodeLastSent.get(key);
   if (!last) return null;
   const waitMs = AUTH_CODE_RESEND_MS - (Date.now() - last);
@@ -584,33 +595,34 @@ function resendCooldownError(email, purpose) {
   return err;
 }
 
-function markAuthCodeSent(email, purpose) {
-  authCodeLastSent.set(authCodeSentKey(email, purpose), Date.now());
+function markAuthCodeSent(loginKey, purpose) {
+  authCodeLastSent.set(authCodeSentKey(loginKey, purpose), Date.now());
 }
 
 app.post("/api/auth/register/send-code", async (req, res) => {
   const parsed = validateRegisterFields(req.body);
   if (parsed.error) return res.status(400).json({ error: parsed.error });
   try {
-    const cooldown = resendCooldownError(parsed.email, "register");
+    const cooldown = resendCooldownError(parsed.username, "register");
     if (cooldown) {
       return res.status(429).json({
         error: cooldown.message,
         retryAfterSeconds: cooldown.retryAfterSeconds
       });
     }
-    const existing = await findMemberByEmail(parsed.email);
-    if (existing) return res.status(409).json({ error: "Email sudah terdaftar. Silakan login." });
+    const existing = await findMemberByUsername(parsed.username);
+    if (existing) return res.status(409).json({ error: "Username sudah dipakai. Pilih yang lain atau login." });
     const code = generateVerificationCode();
-    await saveAuthCode(parsed.email, "register", code);
+    await saveAuthCode(parsed.username, "register", code);
     await sendMail({
       to: parsed.email,
       subject: "Kode verifikasi pendaftaran GBC Cash Management",
-      text: verificationEmailText("register", code)
+      text: verificationEmailText("register", code, parsed.username)
     });
-    markAuthCodeSent(parsed.email, "register");
-    pendingRegister.set(parsed.email, {
+    markAuthCodeSent(parsed.username, "register");
+    pendingRegister.set(parsed.username, {
       name: parsed.name,
+      username: parsed.username,
       email: parsed.email,
       phone: parsed.phone,
       password: parsed.password,
@@ -633,29 +645,31 @@ app.post("/api/auth/register/send-code", async (req, res) => {
 });
 
 app.post("/api/auth/register/verify", async (req, res) => {
-  const email = normalizeEmail(req.body?.email);
+  const username = normalizeUsername(req.body?.username);
   const code = String(req.body?.code || "").trim();
-  if (!email || !code) return res.status(400).json({ error: "Email dan kode verifikasi wajib diisi." });
-  const pending = pendingRegister.get(email);
+  if (!username || !code) return res.status(400).json({ error: "Username dan kode verifikasi wajib diisi." });
+  const pending = pendingRegister.get(username);
   if (!pending || Date.now() - pending.at > 30 * 60 * 1000) {
     return res.status(400).json({ error: "Sesi pendaftaran kedaluwarsa. Ulangi dari awal." });
   }
   try {
-    const ok = await consumeAuthCode(email, "register", code);
+    const ok = await consumeAuthCode(username, "register", code);
     if (!ok) return res.status(400).json({ error: "Kode verifikasi salah atau kedaluwarsa." });
     await createMemberUser({
       name: pending.name,
+      username: pending.username,
       email: pending.email,
       phone: pending.phone,
       password: pending.password
     });
-    pendingRegister.delete(email);
+    pendingRegister.delete(username);
     try {
       await sendMail({
         to: adminNotifyEmail(),
         subject: "[GBC Cash Management] User baru terdaftar",
         text: newUserNotifyText({
           name: pending.name,
+          username: pending.username,
           email: pending.email,
           phone: pending.phone
         })
@@ -674,33 +688,34 @@ app.post("/api/auth/register/verify", async (req, res) => {
 });
 
 app.post("/api/auth/forgot-password/send-code", async (req, res) => {
-  const email = normalizeEmail(req.body?.email);
-  if (!email) return res.status(400).json({ error: "Email wajib diisi." });
+  const usernameCheck = validateUsernameField(req.body?.username);
+  if (usernameCheck.error) return res.status(400).json({ error: usernameCheck.error });
+  const username = usernameCheck.username;
   try {
-    const cooldown = resendCooldownError(email, "reset_password");
+    const cooldown = resendCooldownError(username, "reset_password");
     if (cooldown) {
       return res.status(429).json({
         error: cooldown.message,
         retryAfterSeconds: cooldown.retryAfterSeconds
       });
     }
-    const user = await findMemberByEmail(email);
+    const user = await findMemberByUsername(username);
     if (!user || !user.email_verified) {
-      markAuthCodeSent(email, "reset_password");
+      markAuthCodeSent(username, "reset_password");
       return res.json({
         ok: true,
-        message: "Jika email terdaftar, kode verifikasi telah dikirim.",
+        message: "Jika username terdaftar, kode verifikasi telah dikirim ke email pada akun tersebut.",
         retryAfterSeconds: Math.ceil(AUTH_CODE_RESEND_MS / 1000)
       });
     }
     const code = generateVerificationCode();
-    await saveAuthCode(email, "reset_password", code);
+    await saveAuthCode(username, "reset_password", code);
     await sendMail({
-      to: email,
+      to: user.email,
       subject: "Kode reset password GBC Cash Management",
-      text: verificationEmailText("reset_password", code)
+      text: verificationEmailText("reset_password", code, username)
     });
-    markAuthCodeSent(email, "reset_password");
+    markAuthCodeSent(username, "reset_password");
     res.json({
       ok: true,
       message: "Kode verifikasi dikirim ke email Anda.",
@@ -713,17 +728,18 @@ app.post("/api/auth/forgot-password/send-code", async (req, res) => {
 });
 
 app.post("/api/auth/forgot-password/reset", async (req, res) => {
-  const email = normalizeEmail(req.body?.email);
+  const usernameCheck = validateUsernameField(req.body?.username);
   const code = String(req.body?.code || "").trim();
   const password = String(req.body?.password || "");
   const confirm = String(req.body?.confirmPassword ?? req.body?.confirm_password ?? "");
   const pwErr = validatePasswordPair(password, confirm);
-  if (!email || !code) return res.status(400).json({ error: "Email dan kode wajib diisi." });
+  if (usernameCheck.error) return res.status(400).json({ error: usernameCheck.error });
+  if (!code) return res.status(400).json({ error: "Kode verifikasi wajib diisi." });
   if (pwErr) return res.status(400).json({ error: pwErr });
   try {
-    const ok = await consumeAuthCode(email, "reset_password", code);
+    const ok = await consumeAuthCode(usernameCheck.username, "reset_password", code);
     if (!ok) return res.status(400).json({ error: "Kode verifikasi salah atau kedaluwarsa." });
-    await updateMemberPassword(email, password);
+    await updateMemberPassword(usernameCheck.username, password);
     res.json({ ok: true, message: "Password diperbarui. Silakan login." });
   } catch (e) {
     console.error("forgot reset:", e.message);
@@ -767,7 +783,7 @@ app.patch("/api/admin/users/:userId/access", requireAuth, requireCsrf, requireRo
       entities_kas_besar: req.body?.entities_kas_besar,
       sumber_dana_kas_besar: req.body?.sumber_dana_kas_besar
     });
-    if (access?.email) invalidateMemberFreshCache(access.email);
+    if (access?.user_id) invalidateMemberFreshCache(access.user_id);
     res.json({ ok: true, message: "Akses user diperbarui.", access });
   } catch (e) {
     console.error("admin user access:", e.message);

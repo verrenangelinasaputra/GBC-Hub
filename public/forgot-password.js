@@ -5,11 +5,11 @@ const resetFields = document.getElementById("resetFields");
 const resendBtn = document.getElementById("resendCodeBtn");
 let step = "send";
 
-async function sendResetCode(email) {
+async function sendResetCode(username) {
   const res = await fetch("/api/auth/forgot-password/send-code", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email })
+    body: JSON.stringify({ username })
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 429) {
@@ -25,7 +25,7 @@ function enterResetStep(data) {
   step = "reset";
   resetFields.classList.remove("hidden");
   resendBtn.classList.remove("hidden");
-  form.email.readOnly = true;
+  form.username.readOnly = true;
   submitBtn.textContent = "Simpan password baru";
   msg.textContent = data.message;
   msg.className = "inline-message ok";
@@ -39,7 +39,7 @@ resendBtn.addEventListener("click", async () => {
   resendBtn.disabled = true;
   if (typeof progressStart === "function") progressStart("Mengirim ulang kode…");
   try {
-    const data = await sendResetCode(form.email.value.trim());
+    const data = await sendResetCode(form.username.value.trim());
     msg.textContent = data.message;
     msg.className = "inline-message ok";
     startAuthResendCooldown(resendBtn, data.retryAfterSeconds || AUTH_RESEND_COOLDOWN_SEC);
@@ -64,17 +64,17 @@ form.addEventListener("submit", async e => {
   if (typeof progressStart === "function") {
     progressStart(step === "send" ? "Mengirim kode…" : "Menyimpan password…");
   }
-  const email = form.email.value.trim();
+  const username = form.username.value.trim();
   try {
     if (step === "send") {
-      const data = await sendResetCode(email);
+      const data = await sendResetCode(username);
       enterResetStep(data);
     } else {
       const res = await fetch("/api/auth/forgot-password/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email,
+          username,
           code: form.code.value.trim(),
           password: form.password.value,
           confirmPassword: form.confirmPassword.value

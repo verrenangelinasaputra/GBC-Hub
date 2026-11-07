@@ -8,6 +8,7 @@ let step = "send";
 function registerPayload() {
   return {
     name: form.name.value.trim(),
+    username: form.username.value.trim(),
     email: form.email.value.trim(),
     phone: form.phone.value.trim(),
     password: form.password.value,
@@ -37,6 +38,7 @@ function enterVerifyStep(data) {
   codeBlock.classList.remove("hidden");
   resendBtn.classList.remove("hidden");
   submitBtn.textContent = "Verifikasi & daftar";
+  form.username.readOnly = true;
   form.email.readOnly = true;
   msg.textContent = data.message + (data.devHint ? " " + data.devHint : "");
   msg.className = "inline-message ok";
@@ -84,7 +86,7 @@ form.addEventListener("submit", async e => {
       const res = await fetch("/api/auth/register/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: body.email, code: form.code.value.trim() })
+        body: JSON.stringify({ username: body.username, code: form.code.value.trim() })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Verifikasi gagal.");

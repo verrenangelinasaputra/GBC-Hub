@@ -1746,10 +1746,10 @@ async function renderUserAccess(root) {
     <article class="panel">
       <div id="userAccessMsg" class="inline-message" aria-live="polite"></div>
       <div class="table-wrap"><table class="data-table user-access-table"><thead>
-        <tr><th rowspan="2">Nama</th><th rowspan="2">Email</th><th rowspan="2">Telepon</th>
+        <tr><th rowspan="2">Nama</th><th rowspan="2">Username</th><th rowspan="2">Email</th><th rowspan="2">Telepon</th>
           <th colspan="2">Kas Kecil</th><th colspan="2">Bank</th><th rowspan="2"></th></tr>
         <tr><th>Lihat</th><th>Isi form</th><th>Lihat</th><th>Isi form</th></tr>
-      </thead><tbody id="userAccessBody"><tr><td colspan="8">Memuat…</td></tr></tbody></table></div>
+      </thead><tbody id="userAccessBody"><tr><td colspan="9">Memuat…</td></tr></tbody></table></div>
       <p id="userAccessLink" class="login-foot" style="margin-top:12px"></p>
     </article>`;
   const msg = $("#userAccessMsg");
@@ -1766,7 +1766,7 @@ async function renderUserAccess(root) {
     }
     body.replaceChildren();
     if (!data.users?.length) {
-      body.innerHTML = '<tr><td colspan="8">Belum ada user terdaftar.</td></tr>';
+      body.innerHTML = '<tr><td colspan="9">Belum ada user terdaftar.</td></tr>';
       return;
     }
     for (const u of data.users) {
@@ -1774,6 +1774,7 @@ async function renderUserAccess(root) {
       tr.className = "user-access-row";
       tr.innerHTML = `
         <td>${escapeHtml(u.name)}</td>
+        <td><code>${escapeHtml(u.username || "—")}</code></td>
         <td>${escapeHtml(u.email)}</td>
         <td>${escapeHtml(u.phone || "—")}</td>
         <td><input type="checkbox" data-field="access_kas_kecil" ${u.access_kas_kecil ? "checked" : ""} title="History & Dashboard"></td>
@@ -1787,7 +1788,7 @@ async function renderUserAccess(root) {
         </td>`;
       const scopeTr = document.createElement("tr");
       scopeTr.className = "user-access-scopes hidden";
-      scopeTr.innerHTML = `<td colspan="8"><div class="user-scope-grid">
+      scopeTr.innerHTML = `<td colspan="9"><div class="user-scope-grid">
         ${renderUserScopePanel("Kas Kecil", "kk", catalog, u)}
         ${renderUserScopePanel("Bank", "kb", catalog, u)}
       </div></td>`;
@@ -1822,7 +1823,7 @@ async function renderUserAccess(root) {
           scopeTr.remove();
           toast(del.message || "Akun dihapus.");
           if (!body.querySelector('[data-user-block="1"]')) {
-            body.innerHTML = '<tr><td colspan="8">Belum ada user terdaftar.</td></tr>';
+            body.innerHTML = '<tr><td colspan="9">Belum ada user terdaftar.</td></tr>';
           }
         } catch (e) {
           msg.textContent = e.message;
@@ -1866,7 +1867,7 @@ async function renderUserAccess(root) {
       body.append(tr, scopeTr);
     }
   } catch (e) {
-    body.innerHTML = `<tr><td colspan="8">${escapeHtml(e.message)}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="9">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 

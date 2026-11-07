@@ -25,8 +25,8 @@ Tab dibuat otomatis saat pertama kali dipakai:
 
 | Tab | Isi |
 |-----|-----|
-| **Users** | … `access_kas_*`, `input_kas_*`, `entities_kas_kecil`, `sumber_dana_kas_kecil`, `entities_kas_besar`, `sumber_dana_kas_besar` (pipe-separated), `created_at`, `updated_at` |
-| **AuthCodes** | Kode verifikasi sementara (register / reset password) |
+| **Users** | `user_id`, `name`, **`username`** (unik, untuk login), `email` (boleh sama untuk beberapa user), … `access_kas_*`, `input_kas_*`, entitas/sumber dana, `created_at`, `updated_at` |
+| **AuthCodes** | Kode verifikasi sementara (kolom pertama = **username**, bukan email) |
 
 Env opsional:
 
@@ -68,9 +68,9 @@ Kode muncul di **console** saat `npm start` (jangan dipakai di production).
 
 ## 3. Alur pengguna
 
-1. Buka `/register` → isi nama, email, telepon, password → **Kirim kode**
+1. Buka `/register` → isi nama, **username** (unik), email, telepon, password → **Kirim kode**
 2. Cek email (atau console jika `MAIL_DEV_LOG=true`) → masukkan 6 digit → **Verifikasi**
-3. Login dengan **email + password**
+3. Login dengan **username + password** (bukan email, kecuali user lama yang belum punya kolom username — sementara masih bisa pakai email jika unik di sheet)
 4. Admin mendapat **email notifikasi** (jika SMTP aktif) bahwa ada user baru
 5. Admin login → **User Access** → per modul: **Lihat** / **Isi form** → **Simpan**, atau **Hapus** untuk menghapus akun dari sheet
 6. User refresh → menu Kas muncul di sidebar

@@ -20,10 +20,13 @@
     </div>
     <form class="login-card panel" id="registerForm">
       <h1>Buat akun</h1>
-      <p>Setelah verifikasi email, admin akan mengaktifkan akses Kas Kecil dan/atau Kas Besar.</p>
+      <p>Username unik untuk login (boleh dipakai beberapa orang dengan email yang sama). Setelah verifikasi email, admin mengaktifkan akses.</p>
       <label for="name">Nama lengkap</label>
       <input id="name" name="name" type="text" autocomplete="name" required>
-      <label for="email">Email</label>
+      <label for="username">Username (untuk login)</label>
+      <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" minlength="3" maxlength="32" pattern="[a-zA-Z0-9._-]+" required>
+      <p class="login-foot" style="margin:-4px 0 12px">3–32 karakter: huruf, angka, titik, strip, underscore.</p>
+      <label for="email">Email (kontak / kode verifikasi)</label>
       <input id="email" name="email" type="email" autocomplete="email" required>
       <label for="phone">Nomor telepon</label>
       <input id="phone" name="phone" type="tel" autocomplete="tel" required>
