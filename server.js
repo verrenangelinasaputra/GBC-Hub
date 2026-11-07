@@ -69,6 +69,7 @@ const {
 } = require("./lib/driveUpload");
 const { fetchDriveBuktiPreview } = require("./lib/driveBuktiExport");
 const { renameBuktiFilesForPayload } = require("./lib/driveBuktiRename");
+const { syncBuktiFilesToEntityDrive } = require("./lib/driveBuktiEntitySync");
 const {
   buktiDriveFileName,
   tanggalFromTransactionBody,
@@ -999,16 +1000,26 @@ async function reviseTransaction(req, res, kind) {
     } else if (!payload.bukti) {
       payload.bukti = existing.payload.bukti;
     }
-    const updated = await updateTransactionRow(kind, rowNumber, payload, {
-      revisedBy: picFromSessionUser(req.user)
-    });
     let driveRename = null;
+    let driveEntitySync = null;
     try {
       driveRename = await renameBuktiFilesForPayload(kind, payload.bukti, payload);
     } catch (driveErr) {
       console.error("revisi drive rename:", driveErr.message);
       driveRename = { renamed: 0, errors: [driveErr.message] };
     }
+    try {
+      driveEntitySync = await syncBuktiFilesToEntityDrive(kind, payload.bukti, payload);
+      if (driveEntitySync.buktiLinks?.length) {
+        payload.bukti = driveEntitySync.buktiLinks.join("\n");
+      }
+    } catch (syncErr) {
+      console.error("revisi drive entity sync:", syncErr.message);
+      driveEntitySync = { copied: 0, errors: [syncErr.message] };
+    }
+    const updated = await updateTransactionRow(kind, rowNumber, payload, {
+      revisedBy: picFromSessionUser(req.user)
+    });
     let compile = null;
     try {
       compile = await compileAllRecap();
@@ -1016,17 +1027,19 @@ async function reviseTransaction(req, res, kind) {
       console.error("compile after revisi:", compileErr.message);
       compile = { error: compileErr.message };
     }
-    const renameNote =
-      driveRename?.errors?.length > 0
-        ? ` Spreadsheet sudah diperbarui; beberapa nama file Drive gagal (${driveRename.errors.length}).`
-        : driveRename?.renamed
-          ? ` ${driveRename.renamed} file bukti di Drive di-rename.`
-          : "";
+    const parts = [];
+    if (driveRename?.renamed) parts.push(`${driveRename.renamed} bukti di-rename`);
+    if (driveEntitySync?.copied) parts.push(`${driveEntitySync.copied} bukti disalin ke folder entitas`);
+    const warn =
+      (driveRename?.errors?.length || 0) + (driveEntitySync?.errors?.length || 0) > 0
+        ? ` Beberapa langkah Drive gagal — cek log server.`
+        : "";
     res.json({
       ok: true,
-      message: `Revisi tersimpan (baris ${rowNumber}).${renameNote}`,
+      message: `Revisi tersimpan (baris ${rowNumber}).${parts.length ? ` ${parts.join("; ")}.` : ""}${warn}`,
       update: updated,
       driveRename,
+      driveEntitySync,
       compile
     });
   } catch (e) {
