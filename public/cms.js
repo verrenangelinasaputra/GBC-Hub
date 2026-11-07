@@ -61,19 +61,75 @@ function formatPdfLongDate(iso) {
   return `${Number(m[3])} ${months[Number(m[2]) - 1]} ${m[1]}`;
 }
 
-function buildBuktiPageSections(buktiPages, imageSrc) {
+/** Area gambar bukti di Word (A4 − margin 16mm, judul, + sengaja ~8% lebih kecil = pinggir putih). */
+const WORD_BUKTI_PAGE_FILL = 0.92;
+const WORD_BUKTI_MAX_W_MM = 178 * WORD_BUKTI_PAGE_FILL;
+const WORD_BUKTI_MAX_H_MM = 228 * WORD_BUKTI_PAGE_FILL;
+
+function mmToPx(mm) {
+  return (mm / 25.4) * 96;
+}
+
+function fitBuktiImageForWord(naturalW, naturalH) {
+  const maxWPx = mmToPx(WORD_BUKTI_MAX_W_MM);
+  const maxHPx = mmToPx(WORD_BUKTI_MAX_H_MM);
+  let w = Number(naturalW) || maxWPx;
+  let h = Number(naturalH) || maxHPx * 0.65;
+  const scale = Math.min(maxWPx / w, maxHPx / h, 1);
+  const widthPx = Math.max(1, Math.round(w * scale));
+  const heightPx = Math.max(1, Math.round(h * scale));
+  const widthMm = (widthPx / 96) * 25.4;
+  const heightMm = (heightPx / 96) * 25.4;
+  const widthPt = Math.round((widthMm / 25.4) * 72);
+  const heightPt = Math.round((heightMm / 25.4) * 72);
+  return {
+    widthPx,
+    heightPx,
+    widthCm: Math.round(widthMm) / 10,
+    heightCm: Math.round(heightMm) / 10,
+    widthPt,
+    heightPt
+  };
+}
+
+function measureDataUrlImage(dataUrl) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+
+function wordBuktiImageMarkup(src, p, index) {
+  const alt = escapeHtml(p.caption);
+  const wPt = p.widthPt || 482;
+  const hPt = p.heightPt || 620;
+  const wPx = p.widthPx || Math.round(wPt / 0.75);
+  const hPx = p.heightPx || Math.round(hPt / 0.75);
+  const wCm = p.widthCm ?? Math.round((wPt / 72) * 2.54 * 10) / 10;
+  const hCm = p.heightCm ?? Math.round((hPt / 72) * 2.54 * 10) / 10;
+  const vmlId = `bukti_vml_${index}`;
+  return `<!--[if gte vml 1]><v:shape id="${vmlId}" o:spid="_x0000_i${1025 + index}" type="#_x0000_t75" style="width:${wPt}pt;height:${hPt}pt;"><v:imagedata src="${src}" o:title="${alt}"/></v:shape><![endif]--><!--[if !vml]--><img src="${src}" alt="${alt}" width="${wPx}" height="${hPx}" style="width:${wCm}cm;height:${hCm}cm;"/><!--[endif]-->`;
+}
+
+function buildBuktiPageSections(buktiPages, imageSrc, wordLayout) {
   if (!buktiPages?.length) return "";
   const srcFor = typeof imageSrc === "function" ? imageSrc : p => p.dataUrl;
   return buktiPages
-    .map(
-      (p, i) => `<section class="page bukti-only">
+    .map((p, i) => {
+      const src = srcFor(p, i);
+      const imgHtml = wordLayout
+        ? wordBuktiImageMarkup(src, p, i)
+        : `<img src="${src}" alt="${escapeHtml(p.caption)}">`;
+      return `<section class="page bukti-only">
         <div class="bukti-page-head">
           <span class="bukti-page-no">Bukti ${i + 1} / ${buktiPages.length}</span>
           <span>${escapeHtml(p.caption)}</span>
         </div>
-        <div class="bukti-full"><img src="${srcFor(p, i)}" alt="${escapeHtml(p.caption)}"></div>
-      </section>`
-    )
+        <div class="bukti-full" align="center">${imgHtml}</div>
+      </section>`;
+    })
     .join("");
 }
 
@@ -95,7 +151,8 @@ function wrapBase64Lines(b64) {
 function buildKasKeluarWordMhtml(vouchers, buktiPages, meta) {
   const boundary = `----=_GBC_Export_${Date.now().toString(36)}`;
   const html = buildKasKeluarHtml(vouchers, buktiPages, meta, {
-    imageSrc: (_p, i) => `cid:bukti${i}`
+    imageSrc: (_p, i) => `cid:bukti${i}`,
+    wordImageLayout: true
   });
   const chunks = [
     "MIME-Version: 1.0\r\n",
@@ -125,6 +182,7 @@ function buildKasKeluarWordMhtml(vouchers, buktiPages, meta) {
 
 function buildKasKeluarHtml(vouchers, buktiPages, meta, options) {
   const imageSrc = options?.imageSrc;
+  const wordImageLayout = Boolean(options?.wordImageLayout);
   const pages = vouchers
     .map(v => {
       const penerima = v.penerima.length
@@ -173,11 +231,15 @@ function buildKasKeluarHtml(vouchers, buktiPages, meta, options) {
       </section>`;
     })
     .join("");
-  const buktiHtml = buildBuktiPageSections(buktiPages, imageSrc);
-  return `<!doctype html><html lang="id" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${escapeHtml(meta.title)}</title>
+  const buktiHtml = buildBuktiPageSections(buktiPages, imageSrc, wordImageLayout);
+  const htmlNs = wordImageLayout
+    ? `xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns:v="urn:schemas-microsoft-com:vml"`
+    : `xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"`;
+  return `<!doctype html><html lang="id" ${htmlNs}><head><meta charset="utf-8"><title>${escapeHtml(meta.title)}</title>
 <meta name="ProgId" content="Word.Document">
 <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->
 <style>
+  ${wordImageLayout ? "v\\:* { behavior: url(#default#VML); display: inline-block; }\n  " : ""}
   @page { size: A4; margin: 16mm; }
   * { box-sizing: border-box; }
   body { margin: 0; color: #1e293b; font: 12px "Segoe UI", sans-serif; }
@@ -203,8 +265,9 @@ function buildKasKeluarHtml(vouchers, buktiPages, meta, options) {
   .bukti-only { padding-top: 8px; }
   .bukti-page-head { display: flex; flex-direction: column; gap: 4px; font-size: 12px; margin-bottom: 10px; color: #334155; }
   .bukti-page-no { font-weight: 700; color: #1e3a5f; }
-  .bukti-full { min-height: 88vh; display: flex; align-items: center; justify-content: center; }
+  .bukti-full { min-height: 88vh; display: flex; align-items: center; justify-content: center; text-align: center; }
   .bukti-full img { max-width: 100%; max-height: 88vh; width: auto; height: auto; object-fit: contain; }
+  ${wordImageLayout ? `.bukti-only .bukti-full { min-height: 0; display: block; margin-top: 6pt; }\n  ` : ""}
 </style></head><body>${pages}${buktiHtml}</body></html>`;
 }
 
@@ -262,7 +325,10 @@ async function buildBuktiPagesFromRows(rows) {
   for (const item of items) {
     if (pages.length >= maxTotal) break;
     const dataUrl = await fetchBuktiAsDataUrl(item.id);
-    if (dataUrl) pages.push({ dataUrl, caption: item.caption });
+    if (!dataUrl) continue;
+    const measured = await measureDataUrlImage(dataUrl);
+    const fit = fitBuktiImageForWord(measured?.w, measured?.h);
+    pages.push({ dataUrl, caption: item.caption, ...fit });
   }
   return pages;
 }
