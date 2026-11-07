@@ -61,8 +61,9 @@ function formatPdfLongDate(iso) {
   return `${Number(m[3])} ${months[Number(m[2]) - 1]} ${m[1]}`;
 }
 
-function buildBuktiPageSections(buktiPages) {
+function buildBuktiPageSections(buktiPages, imageSrc) {
   if (!buktiPages?.length) return "";
+  const srcFor = typeof imageSrc === "function" ? imageSrc : p => p.dataUrl;
   return buktiPages
     .map(
       (p, i) => `<section class="page bukti-only">
@@ -70,13 +71,60 @@ function buildBuktiPageSections(buktiPages) {
           <span class="bukti-page-no">Bukti ${i + 1} / ${buktiPages.length}</span>
           <span>${escapeHtml(p.caption)}</span>
         </div>
-        <div class="bukti-full"><img src="${p.dataUrl}" alt="${escapeHtml(p.caption)}"></div>
+        <div class="bukti-full"><img src="${srcFor(p, i)}" alt="${escapeHtml(p.caption)}"></div>
       </section>`
     )
     .join("");
 }
 
-function buildKasKeluarHtml(vouchers, buktiPages, meta) {
+function parseDataUrl(dataUrl) {
+  const s = String(dataUrl || "");
+  const m = s.match(/^data:([^;,]+);base64,([\s\S]+)$/i);
+  if (!m) return null;
+  return { mime: m[1].trim(), base64: m[2].replace(/\s/g, "") };
+}
+
+function wrapBase64Lines(b64) {
+  const clean = String(b64 || "").replace(/\s/g, "");
+  const lines = [];
+  for (let i = 0; i < clean.length; i += 76) lines.push(clean.slice(i, i + 76));
+  return lines.join("\r\n");
+}
+
+/** Word tidak menampilkan img data: — pakai MHTML + CID (didukung Word). */
+function buildKasKeluarWordMhtml(vouchers, buktiPages, meta) {
+  const boundary = `----=_GBC_Export_${Date.now().toString(36)}`;
+  const html = buildKasKeluarHtml(vouchers, buktiPages, meta, {
+    imageSrc: (_p, i) => `cid:bukti${i}`
+  });
+  const chunks = [
+    "MIME-Version: 1.0\r\n",
+    `Content-Type: multipart/related; boundary="${boundary}"; type="text/html"\r\n\r\n`,
+    `--${boundary}\r\n`,
+    `Content-Type: text/html; charset="utf-8"\r\n`,
+    `Content-Transfer-Encoding: 8bit\r\n`,
+    `Content-Location: file:///KasKeluar.htm\r\n\r\n`,
+    html,
+    "\r\n"
+  ];
+  buktiPages.forEach((p, i) => {
+    const parsed = parseDataUrl(p.dataUrl);
+    if (!parsed) return;
+    chunks.push(
+      `--${boundary}\r\n`,
+      `Content-Type: ${parsed.mime}\r\n`,
+      `Content-Transfer-Encoding: base64\r\n`,
+      `Content-ID: <bukti${i}>\r\n\r\n`,
+      wrapBase64Lines(parsed.base64),
+      "\r\n"
+    );
+  });
+  chunks.push(`--${boundary}--\r\n`);
+  return chunks.join("");
+}
+
+function buildKasKeluarHtml(vouchers, buktiPages, meta, options) {
+  const imageSrc = options?.imageSrc;
   const pages = vouchers
     .map(v => {
       const penerima = v.penerima.length
@@ -125,9 +173,10 @@ function buildKasKeluarHtml(vouchers, buktiPages, meta) {
       </section>`;
     })
     .join("");
-  const buktiHtml = buildBuktiPageSections(buktiPages);
+  const buktiHtml = buildBuktiPageSections(buktiPages, imageSrc);
   return `<!doctype html><html lang="id" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${escapeHtml(meta.title)}</title>
 <meta name="ProgId" content="Word.Document">
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->
 <style>
   @page { size: A4; margin: 16mm; }
   * { box-sizing: border-box; }
@@ -1628,7 +1677,8 @@ function renderKasPage(root, kind, layout = "form") {
       const stamp = ($("#tFrom").value || vouchers[0].date || "semua").replace(/[^\d-]/g, "");
       const baseName = `${isBesar ? "Kas-Keluar-Bank" : "Kas-Keluar-Kas-Kecil"}-${stamp || "filter"}`;
       if (format === "word") {
-        downloadKasKeluarFile(html, `${baseName}.doc`, "application/msword");
+        const wordBody = buktiPages.length ? buildKasKeluarWordMhtml(vouchers, buktiPages, meta) : html;
+        downloadKasKeluarFile(wordBody, `${baseName}.doc`, "application/msword");
         toast("File Word diunduh. Buka dengan Microsoft Word.");
       } else {
         const popup = window.open("", "_blank");
