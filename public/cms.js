@@ -42,6 +42,194 @@ function formatTanggalId(iso) {
   return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
+function sheetCell(row, pattern) {
+  for (const [k, v] of Object.entries(row || {})) {
+    if (String(k).startsWith("_")) continue;
+    if (pattern.test(k)) return String(v ?? "").trim();
+  }
+  return "";
+}
+
+function formatPdfAmount(n) {
+  return new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(Math.round(Number(n) || 0));
+}
+
+function formatPdfLongDate(iso) {
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return iso || "—";
+  const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+  return `${Number(m[3])} ${months[Number(m[2]) - 1]} ${m[1]}`;
+}
+
+function buildBuktiPageSections(buktiPages) {
+  if (!buktiPages?.length) return "";
+  return buktiPages
+    .map(
+      (p, i) => `<section class="page bukti-only">
+        <div class="bukti-page-head">
+          <span class="bukti-page-no">Bukti ${i + 1} / ${buktiPages.length}</span>
+          <span>${escapeHtml(p.caption)}</span>
+        </div>
+        <div class="bukti-full"><img src="${p.dataUrl}" alt="${escapeHtml(p.caption)}"></div>
+      </section>`
+    )
+    .join("");
+}
+
+function buildKasKeluarHtml(vouchers, buktiPages, meta) {
+  const pages = vouchers
+    .map(v => {
+      const penerima = v.penerima.length
+        ? v.penerima.map(name => `<div>${escapeHtml(name)}</div>`).join("")
+        : "<div>—</div>";
+      const lines = v.lines
+        .map(
+          line => `<tr><td>${escapeHtml(line.name)}</td><td class="num">${escapeHtml(formatPdfAmount(line.amount))}</td></tr>`
+        )
+        .join("");
+      const notes = v.notes.length
+        ? v.notes.map(note => `<div>${escapeHtml(note)}</div>`).join("")
+        : "<div>—</div>";
+      return `<section class="page">
+        <header class="brand">
+          <div>
+            <b>${escapeHtml(v.entity)}</b>
+            <small>${escapeHtml(meta.kindLabel)} · GBC Cash Management</small>
+          </div>
+          <div class="doc-title">Pembayaran</div>
+        </header>
+        <div class="meta">
+          <div class="box">
+            <div class="box-label">Penerima</div>
+            ${penerima}
+          </div>
+          <div class="box pay">
+            <h2>Pembayaran</h2>
+            <div class="kv"><span>Nomor</span><b>: ${escapeHtml(v.nomor)}</b></div>
+            <div class="kv"><span>Tanggal</span><b>: ${escapeHtml(formatPdfLongDate(v.date))}</b></div>
+            <div class="kv"><span>Sumber dana</span><b>: ${escapeHtml(v.sumber)}</b></div>
+          </div>
+        </div>
+        <table>
+          <thead><tr><th>Nama Beban/Biaya</th><th class="num">Nilai</th></tr></thead>
+          <tbody>${lines}</tbody>
+        </table>
+        <div class="foot">
+          <div>
+            <div class="box-label">Keterangan</div>
+            ${notes}
+          </div>
+          <div class="total"><span>Total</span><b>${escapeHtml(formatPdfAmount(v.total))}</b></div>
+        </div>
+        <div class="sign">Disetujui Oleh,<div class="line"></div><span>Tgl.</span></div>
+      </section>`;
+    })
+    .join("");
+  const buktiHtml = buildBuktiPageSections(buktiPages);
+  return `<!doctype html><html lang="id" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${escapeHtml(meta.title)}</title>
+<meta name="ProgId" content="Word.Document">
+<style>
+  @page { size: A4; margin: 16mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: #1e293b; font: 12px "Segoe UI", sans-serif; }
+  .page { page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+  .brand { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 22px; }
+  .brand b { display: block; font-size: 22px; }
+  .brand small, .doc-title { color: #64748b; }
+  .doc-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-bottom: 22px; }
+  .box { border: 1px solid #cbd5e1; background: #f8fafc; padding: 8px 10px; min-height: 92px; }
+  .box-label, .kv span { font-weight: 700; }
+  .pay h2 { margin: 0 0 8px; font-size: 18px; }
+  .kv { display: grid; grid-template-columns: 92px 1fr; gap: 6px; margin: 2px 0; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #1e3a5f; color: #fff; text-align: left; padding: 7px 8px; }
+  td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+  .num { text-align: right; white-space: nowrap; }
+  .foot { display: grid; grid-template-columns: 1fr 220px; gap: 16px; margin-top: 8px; }
+  .total { display: flex; justify-content: space-between; background: #1e3a5f; color: #fff; padding: 8px 10px; align-self: end; font-weight: 700; }
+  .sign { margin-top: 36px; margin-left: auto; width: 220px; }
+  .line { border-bottom: 1px solid #0f172a; height: 48px; margin: 8px 0; }
+  .bukti-only { padding-top: 8px; }
+  .bukti-page-head { display: flex; flex-direction: column; gap: 4px; font-size: 12px; margin-bottom: 10px; color: #334155; }
+  .bukti-page-no { font-weight: 700; color: #1e3a5f; }
+  .bukti-full { min-height: 88vh; display: flex; align-items: center; justify-content: center; }
+  .bukti-full img { max-width: 100%; max-height: 88vh; width: auto; height: auto; object-fit: contain; }
+</style></head><body>${pages}${buktiHtml}</body></html>`;
+}
+
+async function fetchBuktiAsDataUrl(fileId) {
+  if (!fileId) return null;
+  try {
+    const res = await fetch(`/api/export/bukti/${encodeURIComponent(fileId)}`, { credentials: "same-origin" });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+function collectSortedBuktiItems(rows) {
+  const items = [];
+  const sortedRows = [...rows].sort((a, b) => {
+    const d = String(a._date || "").localeCompare(String(b._date || ""));
+    if (d) return d;
+    const ent = sheetCell(a, /entitas/i).localeCompare(sheetCell(b, /entitas/i), "id");
+    if (ent) return ent;
+    return (Number(a._rowNumber) || 0) - (Number(b._rowNumber) || 0);
+  });
+  for (const row of sortedRows) {
+    const entity = sheetCell(row, /entitas/i) || "—";
+    const date = row._date || "";
+    const cat = row._category || sheetCell(row, /kategori/i) || "Bukti";
+    const nama = sheetCell(row, /nama transaksi/i);
+    const rawBukti = sheetCell(row, /bukti/i);
+    const hrefs = resolveBuktiHrefs(rawBukti);
+    hrefs.forEach((href, fileIdx) => {
+      const id = driveFileIdFromPart(href);
+      if (!id) return;
+      const caption = [formatTanggalId(date), entity, cat, nama].filter(Boolean).join(" · ");
+      items.push({
+        id,
+        caption,
+        sortKey: `${date}|${entity}|${String(row._rowNumber || 0).padStart(8, "0")}|${fileIdx}`
+      });
+    });
+  }
+  return items;
+}
+
+async function buildBuktiPagesFromRows(rows) {
+  const items = collectSortedBuktiItems(rows);
+  const maxTotal = 60;
+  const pages = [];
+  for (const item of items) {
+    if (pages.length >= maxTotal) break;
+    const dataUrl = await fetchBuktiAsDataUrl(item.id);
+    if (dataUrl) pages.push({ dataUrl, caption: item.caption });
+  }
+  return pages;
+}
+
+function downloadKasKeluarFile(html, filename, mime) {
+  const blob = new Blob(["\ufeff", html], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
 function fieldVal(form, name) {
   const el = form.querySelector(`[name="${name}"]`);
   return String(el?.value ?? "").trim();
@@ -1045,6 +1233,8 @@ function renderKasPage(root, kind, layout = "form") {
             <select id="tPerPage"><option>10</option><option selected>20</option><option>50</option></select>
           </label>
           <div class="filter-actions">
+            <button class="btn btn-soft" type="button" id="tExportPdf">Export PDF</button>
+            <button class="btn btn-soft" type="button" id="tExportWord">Export Word</button>
             <button class="btn btn-primary" type="button" id="tRefresh">↻ Refresh data</button>
           </div>
         </div>
@@ -1365,7 +1555,121 @@ function renderKasPage(root, kind, layout = "form") {
 
   let searchTimer;
   onCategoryFilter = applyFilters;
+  $("#tExportPdf").addEventListener("click", () => exportFiltered("pdf"));
+  $("#tExportWord").addEventListener("click", () => exportFiltered("word"));
   $("#tRefresh").addEventListener("click", hardRefreshTable);
+
+  async function exportFiltered(format) {
+    const btn = format === "word" ? $("#tExportWord") : $("#tExportPdf");
+    btn.disabled = true;
+    try {
+      const q = new URLSearchParams({ page: "1", perPage: "1000", all: "1", sort, order });
+      const s = $("#tSearch").value.trim();
+      if (s) q.set("search", s);
+      if ($("#tFrom").value) q.set("dateFrom", $("#tFrom").value);
+      if ($("#tTo").value) q.set("dateTo", $("#tTo").value);
+      if ($("#tCategory").value) q.set("category", $("#tCategory").value);
+      const data = await api(`${apiBase}?` + q.toString());
+      const rows = data.rows || [];
+      if (!rows.length) {
+        toast("Tidak ada data pada filter ini untuk diexport.");
+        return;
+      }
+      const groups = new Map();
+      for (const row of rows) {
+        const entity = sheetCell(row, /entitas/i) || "Tanpa entitas";
+        const date = row._date || "";
+        const key = `${entity}||${date}`;
+        if (!groups.has(key)) groups.set(key, { entity, date, rows: [] });
+        groups.get(key).rows.push(row);
+      }
+      const vouchers = [...groups.values()]
+        .sort((a, b) => a.date.localeCompare(b.date) || a.entity.localeCompare(b.entity, "id"))
+        .map(group => {
+          const penerima = [];
+          const notes = [];
+          const sumberSet = [];
+          const lines = group.rows.map(row => {
+            const payee = sheetCell(row, /dibayarkan/i);
+            const note = sheetCell(row, /keterangan/i) || sheetCell(row, /nama transaksi/i);
+            const sumber = sheetCell(row, /sumber dana/i);
+            const cat = row._category || sheetCell(row, /kategori/i) || "Bukti";
+            if (payee && !penerima.includes(payee)) penerima.push(payee);
+            if (note && !notes.includes(note)) notes.push(note);
+            if (sumber && !sumberSet.includes(sumber)) sumberSet.push(sumber);
+            return {
+              name: cat,
+              amount: Number(row._amount) || 0
+            };
+          });
+          const coa = (sumberSet[0] || "").match(/(\d{5,6})\s*$/)?.[1] || (isBesar ? "BANK" : "KAS");
+          const [year, month, day] = /^\d{4}-\d{2}-\d{2}$/.test(group.date) ? group.date.split("-") : ["0000", "00", "00"];
+          return {
+            entity: group.entity,
+            date: group.date,
+            penerima,
+            notes,
+            lines,
+            sumber: sumberSet.length === 1 ? sumberSet[0] : sumberSet.length ? sumberSet.join(", ") : "—",
+            total: lines.reduce((sum, line) => sum + line.amount, 0),
+            nomor: `${coa}.${year}.${month}.${day}`
+          };
+        });
+      if (typeof progressStart === "function") progressStart("Mengambil gambar bukti…");
+      const buktiPages = await buildBuktiPagesFromRows(rows);
+      if (typeof progressDone === "function") progressDone();
+      const meta = {
+        title: isBesar ? "Kas Keluar Bank" : "Kas Keluar Kas Kecil",
+        kindLabel: isBesar ? "Bank" : "Kas Kecil"
+      };
+      const html = buildKasKeluarHtml(vouchers, buktiPages, meta);
+      const stamp = ($("#tFrom").value || vouchers[0].date || "semua").replace(/[^\d-]/g, "");
+      const baseName = `${isBesar ? "Kas-Keluar-Bank" : "Kas-Keluar-Kas-Kecil"}-${stamp || "filter"}`;
+      if (format === "word") {
+        downloadKasKeluarFile(html, `${baseName}.doc`, "application/msword");
+        toast("File Word diunduh. Buka dengan Microsoft Word.");
+      } else {
+        const popup = window.open("", "_blank");
+        if (!popup) {
+          toast("Izinkan pop-up browser untuk mencetak PDF.");
+          return;
+        }
+        popup.document.open();
+        popup.document.write(html);
+        popup.document.close();
+        popup.focus();
+        const waitImages = () => {
+          const imgs = [...(popup.document?.images || [])];
+          if (!imgs.length) {
+            popup.print();
+            return;
+          }
+          Promise.all(
+            imgs.map(
+              img =>
+                img.complete
+                  ? Promise.resolve()
+                  : new Promise(resolve => {
+                      img.onload = resolve;
+                      img.onerror = resolve;
+                    })
+            )
+          ).then(() => popup.print());
+        };
+        setTimeout(waitImages, 400);
+      }
+      if (data.truncated) toast("Export dibatasi 1.000 baris. Persempit filter bila data terpotong.");
+      if (!buktiPages.length && rows.some(r => sheetCell(r, /bukti/i))) {
+        toast("Bukti tidak tampil sebagai gambar. Pastikan OAuth Drive aktif di server.");
+      } else if (buktiPages.length) {
+        toast(`${buktiPages.length} halaman bukti ditambahkan (satu gambar per halaman).`);
+      }
+    } catch (err) {
+      toast(err.message || "Gagal membuat file export.");
+    } finally {
+      btn.disabled = false;
+    }
+  }
   $("#tFrom").addEventListener("change", applyFilters);
   $("#tTo").addEventListener("change", applyFilters);
   $("#tPerPage").addEventListener("change", applyFilters);

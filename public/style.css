@@ -75,8 +75,8 @@ body.confirm-modal-open{overflow:hidden}
 .filter-field input,.filter-field select{width:100%;min-width:0;border:1px solid #dfe5ef;border-radius:10px;padding:10px 12px;background:#fff;color:#34415a;box-shadow:0 1px 0 #fff inset}
 .filter-field input:focus,.filter-field select:focus{outline:2px solid #c5d4ff;border-color:#9badff}
 .filter-span-2{grid-column:span 2}
-.filter-actions{display:flex;align-items:end;justify-content:flex-end}
-.filter-actions .btn{width:100%}
+.filter-actions{display:flex;align-items:end;justify-content:flex-end;gap:8px}
+.filter-actions .btn{width:auto;flex:1}
 .table-panel .table-scroll{border:1px solid #edf0f6;border-radius:12px;max-height:min(70vh,720px)}
 .table-panel table thead th{position:sticky;top:0;z-index:2;background:#f0f4ff;color:#3d4d6a;font-size:12px;font-weight:700;letter-spacing:.2px;border-bottom:1px solid #dde4f2;box-shadow:0 1px 0 #eef2fb}
 .sheet-th-no{width:52px;text-align:center}

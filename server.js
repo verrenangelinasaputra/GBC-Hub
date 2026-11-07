@@ -62,6 +62,7 @@ const {
   peekUploadFolderCache,
   invalidateUploadFolderCache
 } = require("./lib/driveUpload");
+const { fetchDriveBuktiPreview } = require("./lib/driveBuktiExport");
 const {
   buktiDriveFileName,
   tanggalFromTransactionBody,
@@ -838,6 +839,28 @@ app.get("/api/kas-kecil/transactions", requireAuth, attachFreshMember, requireKa
   } catch (e) {
     console.error("kas-kecil read:", e.message);
     res.status(e.status || 500).json({ error: e.message || "Gagal membaca spreadsheet Kas Kecil." });
+  }
+});
+
+app.get("/api/export/bukti/:fileId", requireAuth, async (req, res) => {
+  const fileId = String(req.params.fileId || "").trim();
+  if (!/^[a-zA-Z0-9_-]{10,}$/.test(fileId)) {
+    return res.status(400).json({ error: "ID bukti tidak valid." });
+  }
+  try {
+    const preview = await fetchDriveBuktiPreview(fileId);
+    if (!preview) {
+      return res.status(404).json({
+        error: "Gambar bukti tidak dapat diambil. Pastikan Drive OAuth aktif dan file masih ada."
+      });
+    }
+    res.setHeader("Content-Type", preview.mimeType);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("X-Bukti-Name", encodeURIComponent(preview.name));
+    res.send(preview.buffer);
+  } catch (e) {
+    console.error("export bukti:", e.message);
+    res.status(e.status || 500).json({ error: e.message || "Gagal mengambil bukti." });
   }
 });
 
