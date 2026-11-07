@@ -80,11 +80,17 @@ function jenisFolderNames(kind) {
     : ["Kas Kecil", "KAS KECIL"];
 }
 
+function entitiesDiffer(a, b) {
+  return normalizeEntityText(a) !== normalizeEntityText(b);
+}
+
 module.exports = {
   ENTITY_DRIVE_ROUTES,
   CV_ANUGERAH_DRIVE_ROOT_ID,
   matchEntityRoute,
   effectiveDriveRootId,
   jenisLabelFromKind,
-  jenisFolderNames
+  jenisFolderNames,
+  normalizeEntityText,
+  entitiesDiffer
 };

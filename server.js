@@ -69,7 +69,8 @@ const {
 } = require("./lib/driveUpload");
 const { fetchDriveBuktiPreview } = require("./lib/driveBuktiExport");
 const { renameBuktiFilesForPayload } = require("./lib/driveBuktiRename");
-const { syncBuktiFilesToEntityDrive } = require("./lib/driveBuktiEntitySync");
+const { syncBuktiFilesToEntityDrive, removeBuktiFromEntityFolder } = require("./lib/driveBuktiEntitySync");
+const { entitiesDiffer } = require("./config/entityDriveRoutes");
 const {
   buktiDriveFileName,
   tanggalFromTransactionBody,
@@ -1001,7 +1002,21 @@ async function reviseTransaction(req, res, kind) {
       payload.bukti = existing.payload.bukti;
     }
     let driveRename = null;
+    let driveEntityRemove = null;
     let driveEntitySync = null;
+    if (entitiesDiffer(existing.payload.entitas, payload.entitas)) {
+      try {
+        driveEntityRemove = await removeBuktiFromEntityFolder(
+          kind,
+          existing.payload.entitas,
+          existing.payload.bukti,
+          existing.payload
+        );
+      } catch (removeErr) {
+        console.error("revisi drive entity remove:", removeErr.message);
+        driveEntityRemove = { removed: 0, errors: [removeErr.message] };
+      }
+    }
     try {
       driveRename = await renameBuktiFilesForPayload(kind, payload.bukti, payload);
     } catch (driveErr) {
@@ -1028,10 +1043,14 @@ async function reviseTransaction(req, res, kind) {
       compile = { error: compileErr.message };
     }
     const parts = [];
+    if (driveEntityRemove?.removed) parts.push(`${driveEntityRemove.removed} salinan lama di folder entitas dihapus`);
     if (driveRename?.renamed) parts.push(`${driveRename.renamed} bukti di-rename`);
     if (driveEntitySync?.copied) parts.push(`${driveEntitySync.copied} bukti disalin ke folder entitas`);
     const warn =
-      (driveRename?.errors?.length || 0) + (driveEntitySync?.errors?.length || 0) > 0
+      (driveRename?.errors?.length || 0) +
+        (driveEntityRemove?.errors?.length || 0) +
+        (driveEntitySync?.errors?.length || 0) >
+      0
         ? ` Beberapa langkah Drive gagal — cek log server.`
         : "";
     res.json({
@@ -1039,6 +1058,7 @@ async function reviseTransaction(req, res, kind) {
       message: `Revisi tersimpan (baris ${rowNumber}).${parts.length ? ` ${parts.join("; ")}.` : ""}${warn}`,
       update: updated,
       driveRename,
+      driveEntityRemove,
       driveEntitySync,
       compile
     });
