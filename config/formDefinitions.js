@@ -18,10 +18,14 @@ const EXPENSE_CATEGORIES = [
   "Beban Keamanan dan Kebersihan",
   "Beban Kuli Angkut Ekspedisi",
   "Beban Listrik",
+  "Beban lainnya",
   "Beban Moulding",
   "Beban Operasional Lainnya",
   "Beban PAM",
   "Beban Packaging",
+  "Beban Pemeliharaan Elektronik Kantor",
+  "Beban Pemeliharaan Gudang",
+  "Beban Pemeliharaan Mobil",
   "Beban Perjalanan Dinas",
   "Beban Perlengkapan Kantor",
   "Beban Printing",
@@ -34,8 +38,11 @@ const EXPENSE_CATEGORIES = [
   "Beban Transportasi Karyawan",
   "Beban Wi-Fi & Internet",
   "PIB & Notulen",
-  "Pajak PPh & PPn"
+  "Pajak PPh & PPn",
+  "Setoran Modal"
 ];
+
+const OTHER_CATEGORY = "Beban lainnya";
 
 const SUMBER_DANA_BANK = [
   "Bank Agung — 110111",
@@ -124,6 +131,7 @@ function formOptionsForKind(kind) {
 module.exports = {
   ENTITIES,
   EXPENSE_CATEGORIES,
+  OTHER_CATEGORY,
   SUMBER_DANA_BANK,
   SUMBER_DANA_KAS_KECIL,
   FORM_HEADERS_KAS_BESAR,

@@ -241,3 +241,8 @@ body.confirm-modal-open{overflow:hidden}
 .scope-check{display:flex;align-items:flex-start;gap:6px;font-size:12px;line-height:1.35;max-width:100%}
 .scope-check input{margin-top:2px;flex-shrink:0}
 .user-access-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.combo{position:relative}
+.combo-menu{position:absolute;z-index:40;left:0;right:0;top:calc(100% + 4px);max-height:240px;overflow:auto;margin:0;padding:4px;list-style:none;background:#fff;border:1px solid #dfe5ef;border-radius:8px;box-shadow:0 12px 30px #1c2d5b1f}
+.combo-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:9px 10px;border-radius:6px;font-weight:600;color:#18243b}
+.combo-menu button:hover,.combo-menu button.is-active{background:#eef2ff}
+.combo-empty{padding:9px 10px;color:#8792a6;font-weight:500;font-size:13px}

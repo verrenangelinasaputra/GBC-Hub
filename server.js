@@ -48,7 +48,7 @@ const {
 } = require("./lib/sheets");
 const { compileAllRecap } = require("./lib/compileRecap");
 const { ENTITIES } = require("./config/hubForm");
-const { formOptionsForKind } = require("./config/formDefinitions");
+const { formOptionsForKind, EXPENSE_CATEGORIES, OTHER_CATEGORY } = require("./config/formDefinitions");
 const {
   filterFormOptionsForUser,
   validateMemberScopeForSubmit,
@@ -132,6 +132,9 @@ function normalizeTransactionBody(body) {
     tanggal: tanggalFromTransactionBody(body),
     entitas: String(body?.entitas || "").trim(),
     category: String(body?.category || body?.kategori || "").trim(),
+    categoryOther: String(body?.categoryOther || body?.category_other || "")
+      .trim()
+      .replace(/\s+/g, " "),
     namaTransaksi: String(body?.namaTransaksi || body?.nama_transaksi || "").trim(),
     amount: body?.amount ?? body?.jumlah,
     keterangan: String(body?.keterangan || "").trim(),
@@ -146,6 +149,12 @@ function validateTransactionPayload(payload, kind, files = [], driveUploadReady 
   if (!payload.tanggal) return "Tanggal pengeluaran wajib diisi.";
   if (!payload.entitas) return "Entitas wajib dipilih.";
   if (!payload.category) return "Kategori wajib dipilih.";
+  if (!EXPENSE_CATEGORIES.includes(payload.category)) {
+    return "Kategori tidak valid. Ketik lalu pilih dari daftar.";
+  }
+  if (payload.category === OTHER_CATEGORY && String(payload.categoryOther || "").length < 2) {
+    return "Isi nama beban pada kolom Beban apa (minimal 2 karakter).";
+  }
   if (!payload.namaTransaksi) return "Nama transaksi wajib diisi.";
   const amount = parseMoneyValue(payload.amount);
   if (!amount || amount <= 0) return "Jumlah pengeluaran (Rp) wajib diisi dan lebih dari 0.";
@@ -850,6 +859,9 @@ async function submitTransaction(req, res, kind) {
   const validationError = validateTransactionPayload(payload, kind, files, driveUpload.ready);
   if (validationError) {
     return res.status(400).json({ error: validationError });
+  }
+  if (payload.category === OTHER_CATEGORY) {
+    payload.category = `${OTHER_CATEGORY} — ${payload.categoryOther}`;
   }
   const scopeError = validateMemberScopeForSubmit(req.user, kind, payload);
   if (scopeError) {

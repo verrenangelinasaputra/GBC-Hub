@@ -11,10 +11,14 @@
     "Beban Keamanan dan Kebersihan",
     "Beban Kuli Angkut Ekspedisi",
     "Beban Listrik",
+    "Beban lainnya",
     "Beban Moulding",
     "Beban Operasional Lainnya",
     "Beban PAM",
     "Beban Packaging",
+    "Beban Pemeliharaan Elektronik Kantor",
+    "Beban Pemeliharaan Gudang",
+    "Beban Pemeliharaan Mobil",
     "Beban Perjalanan Dinas",
     "Beban Perlengkapan Kantor",
     "Beban Printing",
@@ -25,7 +29,8 @@
     "Beban Telekomunikasi",
     "Beban Tempat Kontainer",
     "Beban Transportasi Karyawan",
-    "Beban Wi-Fi & Internet"
+    "Beban Wi-Fi & Internet",
+    "Setoran Modal"
   ],
   "kasKecil": [
     "Beban Alat Tulis Kantor",
@@ -39,10 +44,14 @@
     "Beban Keamanan dan Kebersihan",
     "Beban Kuli Angkut Ekspedisi",
     "Beban Listrik",
+    "Beban lainnya",
     "Beban Moulding",
     "Beban Operasional Lainnya",
     "Beban PAM",
     "Beban Packaging",
+    "Beban Pemeliharaan Elektronik Kantor",
+    "Beban Pemeliharaan Gudang",
+    "Beban Pemeliharaan Mobil",
     "Beban Perjalanan Dinas",
     "Beban Perlengkapan Kantor",
     "Beban Printing",
@@ -53,7 +62,8 @@
     "Beban Telekomunikasi",
     "Beban Tempat Kontainer",
     "Beban Transportasi Karyawan",
-    "Beban Wi-Fi & Internet"
+    "Beban Wi-Fi & Internet",
+    "Setoran Modal"
   ],
   "_note": "Selaras dropdown form web Kas Besar / Kas Kecil."
 }

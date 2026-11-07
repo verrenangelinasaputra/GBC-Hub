@@ -768,6 +768,126 @@ function formSelectOptions(list, placeholder) {
   return `<option value="">${escapeHtml(placeholder)}</option>${opts}`;
 }
 
+const OTHER_CATEGORY = "Beban lainnya";
+
+function bindSearchCombo(box, initialOptions, hooks = {}) {
+  const input = box.querySelector(".combo-input");
+  const hidden = box.querySelector(".combo-value");
+  const menu = box.querySelector(".combo-menu");
+  let items = (initialOptions || []).slice();
+  let matched = items.slice();
+  let active = -1;
+
+  function render(q) {
+    const query = String(q || "").trim().toLowerCase();
+    matched = items.filter(v => !query || v.toLowerCase().includes(query));
+    menu.replaceChildren();
+    if (!matched.length) {
+      const li = document.createElement("li");
+      li.className = "combo-empty";
+      li.textContent = "Tidak ada kategori yang cocok.";
+      menu.append(li);
+      active = -1;
+      return;
+    }
+    if (active >= matched.length) active = matched.length - 1;
+    matched.forEach((v, i) => {
+      const li = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = v;
+      if (i === active) btn.className = "is-active";
+      btn.addEventListener("mousedown", e => {
+        e.preventDefault();
+        choose(v);
+      });
+      li.append(btn);
+      menu.append(li);
+    });
+  }
+
+  function open() {
+    if (input.disabled) return;
+    menu.classList.remove("hidden");
+    render(input.value);
+  }
+
+  function close() {
+    menu.classList.add("hidden");
+    active = -1;
+  }
+
+  function commit(value) {
+    if (hidden.value === value) return;
+    hidden.value = value;
+    hooks.onCommit?.(value);
+  }
+
+  function choose(value) {
+    input.value = value;
+    input.setCustomValidity("");
+    commit(value);
+    close();
+  }
+
+  function setOptions(next) {
+    items = (next || []).slice();
+    if (hidden.value && !items.includes(hidden.value)) {
+      input.value = "";
+      commit("");
+    }
+    if (!menu.classList.contains("hidden")) render(input.value);
+  }
+
+  function clear() {
+    input.value = "";
+    input.setCustomValidity("");
+    commit("");
+    close();
+  }
+
+  input.addEventListener("focus", open);
+  input.addEventListener("input", () => {
+    const typed = input.value.trim();
+    const exact = items.find(v => v.toLowerCase() === typed.toLowerCase());
+    input.setCustomValidity("");
+    commit(exact || "");
+    if (exact && input.value !== exact) input.value = exact;
+    open();
+  });
+  input.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      open();
+      active = Math.min(matched.length - 1, active + 1);
+      render(input.value);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      active = Math.max(0, active - 1);
+      render(input.value);
+    } else if (e.key === "Enter" && !menu.classList.contains("hidden")) {
+      const pick = active >= 0 ? matched[active] : input.value.trim() && matched.length === 1 ? matched[0] : null;
+      if (pick) {
+        e.preventDefault();
+        choose(pick);
+      }
+    } else if (e.key === "Escape") {
+      close();
+    }
+  });
+
+  function onDocClick(e) {
+    if (!box.isConnected) {
+      document.removeEventListener("click", onDocClick);
+      return;
+    }
+    if (!box.contains(e.target)) close();
+  }
+  document.addEventListener("click", onDocClick);
+
+  return { setOptions, choose, clear, input, hidden };
+}
+
 function renderKasPage(root, kind, layout = "form") {
   const isBesar = kind === "kas_besar";
   if (layout === "form" && !userCanSubmitKind(kind)) {
@@ -821,7 +941,16 @@ function renderKasPage(root, kind, layout = "form") {
             <select name="entitas" required ${dis}>${formSelectOptions(entities, "— Pilih entitas —")}</select>
           </label>
           <label>3. Kategori Pengeluaran <span class="req">*</span>
-            <select name="category" required ${dis}>${formSelectOptions(cats, "— Pilih kategori —")}</select>
+            <div class="combo" id="categoryCombo">
+              <input type="text" class="combo-input" placeholder="Ketik untuk mencari kategori…" autocomplete="off" ${dis} ${canSubmit ? "required" : ""}>
+              <input type="hidden" class="combo-value" name="category">
+              <ul class="combo-menu hidden" role="listbox"></ul>
+            </div>
+            <span class="form-hint">Ketik sebagian nama, lalu pilih dari daftar. Berlaku untuk Kas Kecil dan Bank.</span>
+          </label>
+          <label id="categoryOtherLabel" class="hidden">Beban apa? <span class="req">*</span>
+            <input type="text" name="categoryOther" maxlength="120" placeholder="Contoh: sewa genset, iuran lingkungan" ${dis}>
+            <span class="form-hint">Wajib diisi jika kategori yang dipilih adalah Beban lainnya.</span>
           </label>
           <label>4. Nama Transaksi <span class="req">*</span>
             <input type="text" name="namaTransaksi" required maxlength="200" ${dis}>
@@ -905,7 +1034,11 @@ function renderKasPage(root, kind, layout = "form") {
           </label>
           <label class="filter-field">
             <span>Kategori</span>
-            <select id="tCategory"><option value="">Semua kategori</option></select>
+            <div class="combo" id="tCategoryCombo">
+              <input type="text" class="combo-input" id="tCategorySearch" placeholder="Semua kategori" autocomplete="off">
+              <input type="hidden" class="combo-value" id="tCategory">
+              <ul class="combo-menu hidden" role="listbox"></ul>
+            </div>
           </label>
           <label class="filter-field">
             <span>Baris / halaman</span>
@@ -927,6 +1060,25 @@ function renderKasPage(root, kind, layout = "form") {
   if (txForm) {
     const dateInput = txForm.querySelector('input[name="tanggal"]');
     if (dateInput && !dateInput.value) dateInput.value = todayIso();
+    const otherLabel = txForm.querySelector("#categoryOtherLabel");
+    const otherInput = txForm.querySelector('[name="categoryOther"]');
+    function syncCategoryOther(value) {
+      const on = value === OTHER_CATEGORY;
+      otherLabel?.classList.toggle("hidden", !on);
+      if (otherInput) {
+        otherInput.required = on && canSubmit;
+        if (!on) {
+          otherInput.value = "";
+          otherInput.setCustomValidity("");
+        }
+      }
+    }
+    const categoryCombo = bindSearchCombo(txForm.querySelector("#categoryCombo"), cats, {
+      onCommit: syncCategoryOther
+    });
+    txForm.addEventListener("reset", () => {
+      setTimeout(() => categoryCombo.clear(), 0);
+    });
     const buktiInput = txForm.querySelector("#buktiFilesInput");
     const buktiList = txForm.querySelector("#buktiFilesList");
     const MAX_BUKTI_FILES = 5;
@@ -1004,6 +1156,20 @@ function renderKasPage(root, kind, layout = "form") {
       if (tanggalInput && !String(tanggalInput.value || "").trim()) {
         tanggalInput.value = todayIso();
       }
+      const categoryInput = txForm.querySelector("#categoryCombo .combo-input");
+      const pickedCategory = fieldVal(txForm, "category");
+      if (!cats.includes(pickedCategory)) {
+        categoryInput?.setCustomValidity("Pilih kategori dari daftar pencarian.");
+        categoryInput?.reportValidity();
+        return;
+      }
+      categoryInput?.setCustomValidity("");
+      if (pickedCategory === OTHER_CATEGORY && fieldVal(txForm, "categoryOther").length < 2) {
+        otherInput?.setCustomValidity("Isi nama beban (minimal 2 karakter).");
+        otherInput?.reportValidity();
+        return;
+      }
+      otherInput?.setCustomValidity("");
       if (!txForm.checkValidity()) {
         txForm.reportValidity();
         return;
@@ -1025,7 +1191,10 @@ function renderKasPage(root, kind, layout = "form") {
         destinationTab: isBesar ? state.links.kasBesarTab || "Bank" : state.links.kasKecilTab || "KAS KECIL",
         tanggal: tanggalInput?.value || fieldVal(txForm, "tanggal"),
         entitas: fieldVal(txForm, "entitas"),
-        category: fieldVal(txForm, "category"),
+        category:
+          pickedCategory === OTHER_CATEGORY
+            ? `${OTHER_CATEGORY} — ${fieldVal(txForm, "categoryOther")}`
+            : pickedCategory,
         namaTransaksi: fieldVal(txForm, "namaTransaksi"),
         amountLabel: amountNum != null && amountNum > 0 ? rupiah(amountNum) : amountRaw || "—",
         keterangan: fieldVal(txForm, "keterangan"),
@@ -1081,21 +1250,19 @@ function renderKasPage(root, kind, layout = "form") {
     notice.className = "inline-message";
   }
 
-  const tCat = $("#tCategory");
-  cats.forEach(c => tCat.append(new Option(c, c)));
+  let onCategoryFilter = () => {};
+  const historyCategoryCombo = bindSearchCombo($("#tCategoryCombo"), cats, {
+    onCommit: () => onCategoryFilter()
+  });
 
   function mergeCategoryOptions(rows) {
-    const current = $("#tCategory").value;
-    const existing = new Set([...tCat.options].map(o => o.value).filter(Boolean));
+    const existing = new Set(cats);
     rows.forEach(row => {
       const cat = row._category || row["3. Kategori Pengeluaran"] || row["Kategori Pengeluaran"];
       const val = String(cat || "").trim();
-      if (val && !existing.has(val)) {
-        tCat.append(new Option(val, val));
-        existing.add(val);
-      }
+      if (val) existing.add(val);
     });
-    if (current) tCat.value = current;
+    historyCategoryCombo.setOptions([...existing].sort((a, b) => a.localeCompare(b, "id")));
   }
 
   let page = 1;
@@ -1197,8 +1364,8 @@ function renderKasPage(root, kind, layout = "form") {
   }
 
   let searchTimer;
+  onCategoryFilter = applyFilters;
   $("#tRefresh").addEventListener("click", hardRefreshTable);
-  $("#tCategory").addEventListener("change", applyFilters);
   $("#tFrom").addEventListener("change", applyFilters);
   $("#tTo").addEventListener("change", applyFilters);
   $("#tPerPage").addEventListener("change", applyFilters);
