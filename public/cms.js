@@ -356,9 +356,11 @@ function isHttpUrl(val) {
 function driveFileIdFromPart(part) {
   const s = String(part ?? "").trim();
   if (!s) return "";
+  if (/drive\.google\.com\/drive\/folders\//i.test(s) || /\/folders\//i.test(s)) return "";
   if (/^[a-zA-Z0-9_-]{20,}$/.test(s) && !/^https?:/i.test(s)) return s;
   const patterns = [
     /\/file\/d\/([a-zA-Z0-9_-]+)/,
+    /googleusercontent\.com\/d\/([a-zA-Z0-9_-]+)/,
     /\/d\/([a-zA-Z0-9_-]+)/,
     /[?&]id=([a-zA-Z0-9_-]+)/
   ];
