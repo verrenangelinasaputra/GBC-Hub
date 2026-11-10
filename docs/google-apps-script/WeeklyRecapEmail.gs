@@ -285,6 +285,15 @@ function getIsoWeekNumber_(date, tz) {
 
 // ——— Data hub ———
 
+/** Sheet kosong (tab ada, belum ada sel) membuat getDataRange() error: "kolom … minimal 1". */
+function getSheetDataValues_(sh) {
+  if (!sh) return [];
+  const lastRow = sh.getLastRow();
+  const lastCol = sh.getLastColumn();
+  if (lastRow < 1 || lastCol < 1) return [];
+  return sh.getRange(1, 1, lastRow, lastCol).getValues();
+}
+
 function loadHubTransactions_() {
   const ss = SpreadsheetApp.openById(WEEKLY_RECAP_CONFIG.HUB_SPREADSHEET_ID);
   let rows = readCompiledTable_(ss);
@@ -298,8 +307,7 @@ function loadHubTransactions_() {
 
 function readCompiledTable_(ss) {
   const sh = ss.getSheetByName(WEEKLY_RECAP_CONFIG.COMPILED_TAB);
-  if (!sh) return [];
-  const values = sh.getDataRange().getValues();
+  const values = getSheetDataValues_(sh);
   if (values.length < 2) return [];
   const headers = values[0].map(h => String(h || "").trim().toLowerCase());
   const idx = name => headers.findIndex(h => h === name || name.test(h));
@@ -333,8 +341,7 @@ function readCompiledTable_(ss) {
 
 function readInputTab_(ss, tabName, jenisLabel) {
   const sh = ss.getSheetByName(tabName);
-  if (!sh) return [];
-  const values = sh.getDataRange().getValues();
+  const values = getSheetDataValues_(sh);
   if (values.length < 2) return [];
   const headers = values[0].map(h => String(h || "").trim().toLowerCase());
   const find = re => headers.findIndex(h => re.test(h));

@@ -39,6 +39,8 @@ const EXPENSE_CATEGORIES = [
   "Beban Wi-Fi & Internet",
   "PIB & Notulen",
   "Pajak PPh & PPn",
+  "Pengambilan Dana Bank",
+  "Pengambilan Kas Kecil",
   "Setoran Modal"
 ];
 
