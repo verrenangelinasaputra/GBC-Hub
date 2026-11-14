@@ -207,6 +207,21 @@ function clearCookie() {
     (isProductionCookie() ? "; Secure" : "");
 }
 
+const OAUTH_STATE_COOKIE = "drive_oauth_state";
+const OAUTH_STATE_TTL_MS = 15 * 60 * 1000;
+
+function makeNamedCookie(name, value, maxAgeMs) {
+  const sec = Math.max(60, Math.floor(Number(maxAgeMs) / 1000));
+  const encoded = encodeURIComponent(String(value || ""));
+  return `${name}=${encoded}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${sec}` +
+    (isProductionCookie() ? "; Secure" : "");
+}
+
+function clearNamedCookie(name) {
+  return `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0` +
+    (isProductionCookie() ? "; Secure" : "");
+}
+
 /** Cookie bertanda (stateless) — wajib untuk Vercel/serverless (tanpa Map di memori). */
 function encodeSessionToken(payload) {
   const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
@@ -534,7 +549,20 @@ function verifyOAuthState(state) {
   if (dot <= 0) return false;
   const body = state.slice(0, dot);
   const mac = state.slice(dot + 1);
+  const m = /^drive-oauth-(\d+)$/.exec(body);
+  if (!m) return false;
+  const ts = Number(m[1]);
+  if (!Number.isFinite(ts) || Date.now() - ts > OAUTH_STATE_TTL_MS) return false;
   return mac && safeEqual(mac, sign(body));
+}
+
+/** CSRF OAuth: tanda HMAC atau cookie yang diset saat /connect (stabil di Vercel). */
+function oauthStateAccepted(req) {
+  const queryState = String(req.query?.state || "");
+  if (!queryState) return false;
+  const cookieState = getCookie(req, OAUTH_STATE_COOKIE);
+  if (cookieState && safeEqual(cookieState, queryState)) return true;
+  return verifyOAuthState(queryState);
 }
 
 app.get("/api/oauth/drive/connect", requireAuth, requireRoles("super_admin", "admin"), (req, res) => {
@@ -543,13 +571,22 @@ app.get("/api/oauth/drive/connect", requireAuth, requireRoles("super_admin", "ad
       "OAuth belum siap. Isi GOOGLE_OAUTH_CLIENT_ID dan GOOGLE_OAUTH_CLIENT_SECRET di .env — lihat docs/DRIVE_BUKTI_SETUP.md"
     );
   }
-  res.redirect(getDriveOAuthUrl(signOAuthState()));
+  const state = signOAuthState();
+  res.setHeader(
+    "Set-Cookie",
+    makeNamedCookie(OAUTH_STATE_COOKIE, state, OAUTH_STATE_TTL_MS)
+  );
+  res.redirect(getDriveOAuthUrl(state));
 });
 
 app.get("/api/oauth/drive/callback", async (req, res) => {
-  if (!verifyOAuthState(String(req.query.state || ""))) {
-    return res.status(403).send("OAuth state tidak valid. Ulangi dari tombol Hubungkan Google Drive.");
+  if (!oauthStateAccepted(req)) {
+    const hint =
+      "Mulai ulang dari gbchub → Hubungkan Google Drive (jangan buka URL callback manual). " +
+      "Pastikan SESSION_SECRET & GOOGLE_OAUTH_REDIRECT_URI=https://gbchub.vercel.app/api/oauth/drive/callback di Vercel.";
+    return res.status(403).send(`OAuth state tidak valid. Ulangi dari tombol Hubungkan Google Drive. ${hint}`);
   }
+  res.setHeader("Set-Cookie", clearNamedCookie(OAUTH_STATE_COOKIE));
   const code = String(req.query.code || "");
   if (!code) {
     return res.status(400).send("Kode OAuth tidak ditemukan.");

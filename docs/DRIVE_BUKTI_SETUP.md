@@ -44,6 +44,24 @@ Folder bukti harus **milik akun Google yang sama** saat OAuth (atau Anda punya a
 
 ---
 
+## Vercel — `OAuth state tidak valid`
+
+Penyebab umum:
+
+1. **URL callback dibuka langsung** (bookmark / refresh) tanpa lewat tombol **Hubungkan Google Drive**.
+2. **`GOOGLE_OAUTH_REDIRECT_URI` belum diset** di Vercel → isi persis:
+   ```env
+   GOOGLE_OAUTH_REDIRECT_URI=https://gbchub.vercel.app/api/oauth/drive/callback
+   ```
+   (Sama persis di Google Cloud → OAuth client → Authorized redirect URIs.)
+3. **`SESSION_SECRET`** belum ada atau beda antar deploy — wajib min 24 karakter, sama untuk Production.
+4. Flow **terlalu lama** (>15 menit) atau deploy ulang di tengah jalan → klik **Hubungkan** lagi.
+5. Browser memblok cookie pihak ketiga — coba Chrome normal / incognito, selesaikan login Google dalam satu tab.
+
+Setelah ubah env di Vercel → **Redeploy** → login web → **Hubungkan Google Drive** (bukan ketik URL callback).
+
+---
+
 ## Alternatif: Google Workspace Shared drive
 
 Tanpa OAuth: Shared drive + service account Content manager (lihat bagian lama di repo).  
