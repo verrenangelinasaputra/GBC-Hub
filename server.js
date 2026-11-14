@@ -45,6 +45,8 @@ const {
   appendTransaction,
   updateTransactionRow,
   getTransactionRow,
+  extractAllDriveFileIds,
+  driveFileViewUrl,
   hubSheetMode,
   getHubSpreadsheetId,
   parseMoneyValue,
@@ -70,6 +72,7 @@ const {
 const { fetchDriveBuktiPreview } = require("./lib/driveBuktiExport");
 const { renameBuktiFilesForPayload } = require("./lib/driveBuktiRename");
 const { syncBuktiFilesToEntityDrive, removeBuktiFromEntityFolder } = require("./lib/driveBuktiEntitySync");
+const { trashBuktiDriveFiles } = require("./lib/driveBuktiDelete");
 const { entitiesDiffer } = require("./config/entityDriveRoutes");
 const {
   buktiDriveFileName,
@@ -1001,6 +1004,41 @@ async function reviseTransaction(req, res, kind) {
     } else if (!payload.bukti) {
       payload.bukti = existing.payload.bukti;
     }
+
+    const previousIds = extractAllDriveFileIds(existing.payload.bukti);
+    const nextIds = extractAllDriveFileIds(payload.bukti);
+    const removedIds = previousIds.filter(id => !nextIds.includes(id));
+    let driveBuktiDelete = null;
+    let driveEntityRemovedCopies = null;
+    if (removedIds.length) {
+      if (!driveUpload.ready) {
+        return res.status(503).json({
+          error:
+            "Menghapus bukti membutuhkan Google Drive OAuth aktif. Sisakan semua gambar atau hubungi admin untuk menghubungkan Drive."
+        });
+      }
+      const removedRaw = removedIds.map(id => driveFileViewUrl(id)).join("\n");
+      try {
+        driveEntityRemovedCopies = await removeBuktiFromEntityFolder(
+          kind,
+          payload.entitas,
+          removedRaw,
+          payload
+        );
+      } catch (removeCopyErr) {
+        console.error("revisi drive bukti entity cleanup:", removeCopyErr.message);
+        driveEntityRemovedCopies = { removed: 0, errors: [removeCopyErr.message] };
+      }
+      try {
+        driveBuktiDelete = await trashBuktiDriveFiles(removedIds);
+      } catch (delErr) {
+        console.error("revisi drive bukti trash:", delErr.message);
+        return res.status(delErr.status || 500).json({
+          error: delErr.message || "Gagal menghapus bukti dari Google Drive."
+        });
+      }
+    }
+
     let driveRename = null;
     let driveEntityRemove = null;
     let driveEntitySync = null;
@@ -1044,12 +1082,15 @@ async function reviseTransaction(req, res, kind) {
     }
     const parts = [];
     if (driveEntityRemove?.removed) parts.push(`${driveEntityRemove.removed} salinan lama di folder entitas dihapus`);
+    if (driveBuktiDelete?.trashed) parts.push(`${driveBuktiDelete.trashed} bukti dihapus dari Drive`);
     if (driveRename?.renamed) parts.push(`${driveRename.renamed} bukti di-rename`);
     if (driveEntitySync?.copied) parts.push(`${driveEntitySync.copied} bukti disalin ke folder entitas`);
     const warn =
       (driveRename?.errors?.length || 0) +
         (driveEntityRemove?.errors?.length || 0) +
-        (driveEntitySync?.errors?.length || 0) >
+        (driveEntitySync?.errors?.length || 0) +
+        (driveBuktiDelete?.errors?.length || 0) +
+        (driveEntityRemovedCopies?.errors?.length || 0) >
       0
         ? ` Beberapa langkah Drive gagal — cek log server.`
         : "";
@@ -1060,6 +1101,8 @@ async function reviseTransaction(req, res, kind) {
       driveRename,
       driveEntityRemove,
       driveEntitySync,
+      driveBuktiDelete,
+      driveEntityRemovedCopies,
       compile
     });
   } catch (e) {

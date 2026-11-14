@@ -50,6 +50,16 @@ a.nav-link{text-decoration:none}
 .confirm-modal-panel.revisi-modal-panel{width:min(640px,100%);max-height:min(92vh,860px)}
 .revisi-modal-form{margin:0;padding:0;max-height:min(58vh,520px);overflow:auto;padding-right:4px}
 .revisi-modal-panel .combo-menu{z-index:10050}
+.revisi-bukti-field{display:grid;gap:8px}
+.revisi-bukti-label{font-size:13px;font-weight:700;color:#6f7c93}
+.revisi-bukti-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:10px;margin:4px 0}
+.revisi-bukti-empty{margin:0;font-size:12px;color:#8792a6;line-height:1.55;padding:10px 12px;background:#f6f8fc;border:1px dashed #dce3ef;border-radius:10px;grid-column:1/-1}
+.revisi-bukti-tile{position:relative;border-radius:12px;overflow:hidden;border:1px solid #e3e8f2;background:#f8f9fc;aspect-ratio:1}
+.revisi-bukti-media{display:grid;place-items:center;width:100%;height:100%;min-height:108px}
+.revisi-bukti-thumb{width:100%;height:100%;object-fit:cover;display:block}
+.revisi-bukti-fallback{font-size:11px;font-weight:600;color:#6f7c93;text-align:center;padding:8px;line-height:1.4}
+.revisi-bukti-remove{position:absolute;top:6px;right:6px;width:28px;height:28px;border:0;border-radius:50%;background:#ffffffe8;color:#b91c1c;font-size:20px;font-weight:800;line-height:1;cursor:pointer;box-shadow:0 2px 8px #1c2d5b22;display:grid;place-items:center;padding:0}
+.revisi-bukti-remove:hover{background:#fee2e2}
 body.confirm-modal-open{overflow:hidden}
 @media(max-width:820px){
 .confirm-modal{align-items:end;padding:0}

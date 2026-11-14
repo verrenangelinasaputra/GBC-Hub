@@ -1208,6 +1208,67 @@ function bindSearchCombo(box, initialOptions, hooks = {}) {
   return { setOptions, choose, clear, input, hidden };
 }
 
+function syncRevisiBuktiHidden(hiddenInput, keptHrefs) {
+  if (!hiddenInput) return;
+  hiddenInput.value = keptHrefs.join("\n");
+}
+
+function renderRevisiBuktiGallery(gallery, hiddenInput, keptHrefs, onChange) {
+  if (!gallery) return;
+  gallery.replaceChildren();
+  if (!keptHrefs.length) {
+    const empty = document.createElement("p");
+    empty.className = "revisi-bukti-empty";
+    empty.textContent = "Belum ada bukti tersimpan. Unggah file baru di bawah.";
+    gallery.append(empty);
+    syncRevisiBuktiHidden(hiddenInput, keptHrefs);
+    return;
+  }
+  keptHrefs.forEach((href, index) => {
+    const id = driveFileIdFromPart(href);
+    const tile = document.createElement("div");
+    tile.className = "revisi-bukti-tile";
+
+    const media = document.createElement("div");
+    media.className = "revisi-bukti-media";
+
+    if (id) {
+      const img = document.createElement("img");
+      img.className = "revisi-bukti-thumb";
+      img.alt = `Bukti ${index + 1}`;
+      img.loading = "lazy";
+      img.src = `/api/export/bukti/${encodeURIComponent(id)}`;
+      img.addEventListener("error", () => {
+        const fallback = document.createElement("span");
+        fallback.className = "revisi-bukti-fallback";
+        fallback.textContent = "PDF / pratinjau";
+        img.replaceWith(fallback);
+      });
+      media.append(img);
+    } else {
+      const fallback = document.createElement("span");
+      fallback.className = "revisi-bukti-fallback";
+      fallback.textContent = "Link bukti tidak dikenali";
+      media.append(fallback);
+    }
+
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "revisi-bukti-remove";
+    rm.setAttribute("aria-label", `Hapus bukti ${index + 1}`);
+    rm.title = "Hapus dari transaksi & Drive saat simpan";
+    rm.textContent = "×";
+    rm.addEventListener("click", () => {
+      keptHrefs.splice(index, 1);
+      onChange();
+    });
+
+    tile.append(media, rm);
+    gallery.append(tile);
+  });
+  syncRevisiBuktiHidden(hiddenInput, keptHrefs);
+}
+
 async function openRevisiRowModal(ctx) {
   const rowNo = ctx.row?._rowNumber;
   if (!rowNo) return;
@@ -1225,7 +1286,7 @@ async function openRevisiRowModal(ctx) {
       <div class="confirm-modal-head">
         <span class="confirm-modal-badge">Revisi</span>
         <h3 id="revisiModalTitle">Revisi baris #${escapeHtml(String(rowNo))}</h3>
-        <p class="confirm-modal-lead">Semua kolom dapat diubah. Setelah simpan, spreadsheet dan nama file bukti di Drive diperbarui.</p>
+        <p class="confirm-modal-lead">Semua kolom dapat diubah. Klik × pada bukti untuk menghapus; file akan dibuang dari Google Drive saat Anda simpan.</p>
       </div>
       <form class="form-grid revisi-modal-form" id="revisiForm" enctype="multipart/form-data" novalidate>
         <label>Tanggal Pengeluaran <span class="req">*</span><input type="date" name="tanggal" required></label>
@@ -1245,13 +1306,18 @@ async function openRevisiRowModal(ctx) {
         <label>${ctx.isBesar ? "Sumber Dana Bank" : "Sumber Dana Kas Kecil"} <span class="req">*</span>
           <select name="sumberDana" required>${formSelectOptions(ctx.sumberList, "—")}</select>
         </label>
-        <label>Link bukti (satu atau banyak baris)
-          <textarea name="bukti" rows="2" placeholder="https://drive.google.com/file/d/…"></textarea>
-        </label>
+        <div class="revisi-bukti-field">
+          <span class="revisi-bukti-label">Bukti transaksi</span>
+          <input type="hidden" name="bukti" id="revisiBuktiHidden">
+          <div class="revisi-bukti-grid" id="revisiBuktiGallery" aria-live="polite"></div>
+          <span class="form-hint">Klik × untuk mengecualikan gambar. Penghapusan baru berlaku setelah <strong>Simpan revisi</strong>.</span>
+        </div>
         ${
           state.driveUploadReady
             ? `<label>Tambah file bukti baru<input type="file" name="buktiFiles" accept="image/*,application/pdf" multiple></label>`
-            : ""
+            : state.driveUpload?.oauthConnectUrl && canConnectDriveOAuth()
+              ? `<p class="inline-message">Untuk menghapus bukti otomatis di Drive, <a href="${state.driveUpload.oauthConnectUrl}">hubungkan Google Drive</a> (admin).</p>`
+              : ""
         }
         <label>Nama PIC <span class="req">*</span><input type="text" name="pic" required></label>
       </form>
@@ -1304,12 +1370,26 @@ async function openRevisiRowModal(ctx) {
   form.querySelector('[name="keterangan"]').value = payload.keterangan || "";
   form.querySelector('[name="dibayarkan"]').value = payload.dibayarkan || "";
   form.querySelector('[name="sumberDana"]').value = payload.sumberDana || "";
-  form.querySelector('[name="bukti"]').value = payload.bukti || "";
   form.querySelector('[name="pic"]').value = payload.pic || state.user?.display_name || "";
+  const buktiHidden = form.querySelector("#revisiBuktiHidden");
+  const buktiGallery = form.querySelector("#revisiBuktiGallery");
+  const keptBuktiHrefs = resolveBuktiHrefs(payload.bukti || "");
+  const refreshBuktiGallery = () =>
+    renderRevisiBuktiGallery(buktiGallery, buktiHidden, keptBuktiHrefs, refreshBuktiGallery);
+  refreshBuktiGallery();
   form.addEventListener("submit", async e => {
     e.preventDefault();
     if (!form.checkValidity()) {
       form.reportValidity();
+      return;
+    }
+    const buktiFilesInput = form.querySelector('[name="buktiFiles"]');
+    const hasNewFiles = (buktiFilesInput?.files?.length || 0) > 0;
+    const hasKept = String(buktiHidden?.value || "").trim().length > 0;
+    if (!hasKept && !hasNewFiles) {
+      msg.className = "inline-message error";
+      msg.textContent = "Minimal satu bukti harus ada (sisakan gambar atau unggah file baru).";
+      msg.classList.remove("hidden");
       return;
     }
     const picked = fieldVal(form, "category");
@@ -1389,7 +1469,7 @@ function renderKasPage(root, kind, layout = "form") {
     <div class="page-heading"><small>${isBesar ? "BANK" : "PETTY CASH"}</small><h1>${escapeHtml(title)}</h1>
       <p>${
         isRevisi
-          ? "Perbaiki baris yang salah. Perubahan langsung ke spreadsheet; nama file bukti di Drive disesuaikan otomatis (link tidak berubah)."
+          ? "Perbaiki baris yang salah. Bukti ditampilkan sebagai gambar — klik × untuk hapus (file ikut dibuang dari Drive saat simpan)."
           : `${escapeHtml(formSub)} Pastikan data benar dan bukti dilampirkan. Data masuk tab <strong>${escapeHtml(isBesar ? (state.links.kasBesarTab || "Bank") : (state.links.kasKecilTab || "KAS KECIL"))}</strong>.`
       }</p>
     </div>
