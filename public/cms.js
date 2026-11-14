@@ -1310,9 +1310,149 @@ function renderRevisiBuktiList(listEl, hiddenInput, keptItems, onChange) {
   syncRevisiBuktiHidden(hiddenInput, keptItems);
 }
 
+const MAX_BUKTI_PER_TX = 5;
+
+function formatBuktiFileSize(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Kumpulkan file upload revisi (sama seperti form input — bisa tambah beberapa kali). */
+function bindRevisiBuktiFileUpload(form, pendingListEl, getKeptCount) {
+  const input = form.querySelector("#revisiBuktiFilesInput");
+  if (!input || !pendingListEl) return { held: [], count: () => 0 };
+  const held = [];
+  const sync = () => {
+    const dt = new DataTransfer();
+    held.forEach(f => dt.items.add(f));
+    input.files = dt.files;
+    pendingListEl.replaceChildren();
+    held.forEach((f, i) => {
+      const li = document.createElement("li");
+      li.className = "bukti-files-item";
+      const meta = document.createElement("span");
+      meta.className = "bukti-files-meta";
+      const size = formatBuktiFileSize(f.size);
+      meta.title = f.name;
+      meta.textContent = size ? `${f.name} (${size})` : f.name;
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "bukti-files-remove btn btn-soft";
+      rm.setAttribute("aria-label", `Batalkan unggah ${f.name}`);
+      rm.textContent = "✕ Batal";
+      rm.addEventListener("click", () => {
+        held.splice(i, 1);
+        sync();
+      });
+      li.append(meta, rm);
+      pendingListEl.append(li);
+    });
+  };
+  input.addEventListener("change", () => {
+    const incoming = [...input.files];
+    if (!incoming.length) return;
+    const kept = getKeptCount();
+    for (const f of incoming) {
+      if (kept + held.length >= MAX_BUKTI_PER_TX) {
+        toast(`Maksimal ${MAX_BUKTI_PER_TX} bukti per transaksi (termasuk yang sudah ada).`);
+        break;
+      }
+      const dup = held.some(
+        h => h.name === f.name && h.size === f.size && h.lastModified === f.lastModified
+      );
+      if (!dup) held.push(f);
+    }
+    input.value = "";
+    sync();
+  });
+  return { held, count: () => held.length, sync };
+}
+
+function bindRevisiBuktiLinkPaste(form, keptItems, refreshList) {
+  const draft = form.querySelector("#revisiBuktiLinkDraft");
+  const btn = form.querySelector("#revisiBuktiLinkAdd");
+  if (!draft || !btn) return;
+  const addLinks = () => {
+    const hrefs = resolveBuktiHrefs(draft.value);
+    if (!hrefs.length) {
+      toast("Tempel minimal satu link Drive yang valid.");
+      return;
+    }
+    let added = 0;
+    for (const href of hrefs) {
+      if (keptItems.length >= MAX_BUKTI_PER_TX) {
+        toast(`Maksimal ${MAX_BUKTI_PER_TX} bukti per transaksi.`);
+        break;
+      }
+      if (keptItems.some(k => k.href === href)) continue;
+      const id = driveFileIdFromPart(href);
+      keptItems.push({
+        id,
+        href,
+        name: id ? "Bukti (link baru)" : href,
+        mimeType: ""
+      });
+      added += 1;
+    }
+    if (added) {
+      draft.value = "";
+      refreshList();
+      toast(`${added} link ditambahkan ke daftar.`);
+    } else {
+      toast("Link sudah ada di daftar atau tidak dikenali.");
+    }
+  };
+  btn.addEventListener("click", addLinks);
+  draft.addEventListener("keydown", e => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      addLinks();
+    }
+  });
+}
+
+function revisiBuktiAddSectionHtml(uploadReady) {
+  const uploadNote = escapeHtml(buktiUploadNoteForForm());
+  const manualHint = escapeHtml(buktiManualLinkHintForForm());
+  const oauthBlock =
+    !uploadReady && canConnectDriveOAuth() && state.driveUpload?.oauthConnectUrl
+      ? `<p style="margin:10px 0 0"><a class="btn btn-primary btn-sm" href="${state.driveUpload.oauthConnectUrl}">Hubungkan Google Drive (admin)</a></p>`
+      : "";
+  const fileBlock = uploadReady
+    ? `<label class="revisi-bukti-upload-label">Unggah foto atau PDF
+        <input type="file" id="revisiBuktiFilesInput" name="buktiFiles" accept="image/*,application/pdf,.pdf,.png,.jpg,.jpeg,.webp" multiple>
+        <span class="form-hint">${uploadNote} Pilih banyak sekaligus atau tambah bertahap (maks. ${MAX_BUKTI_PER_TX} bukti per transaksi).</span>
+      </label>
+      <ul class="bukti-files-list" id="revisiBuktiPending" aria-live="polite"></ul>`
+    : `<p class="inline-message revisi-bukti-upload-off">${uploadNote}</p>${oauthBlock}`;
+  const linkBlock = `<div class="revisi-bukti-link-add${uploadReady ? "" : " revisi-bukti-link-add-primary"}">
+      <label>Tempel link bukti baru (Google Drive)
+        <textarea id="revisiBuktiLinkDraft" rows="2" placeholder="https://drive.google.com/file/d/…"></textarea>
+        <span class="form-hint">${manualHint || "Satu atau banyak link — dipisah baris baru."}</span>
+      </label>
+      <button type="button" class="btn btn-soft btn-sm" id="revisiBuktiLinkAdd">Tambah link ke daftar</button>
+    </div>`;
+  return `<div class="revisi-bukti-add">
+      <span class="revisi-bukti-add-title">Tambah bukti baru</span>
+      ${fileBlock}
+      ${linkBlock}
+    </div>`;
+}
+
 async function openRevisiRowModal(ctx) {
   const rowNo = ctx.row?._rowNumber;
   if (!rowNo) return;
+  try {
+    const st = await api("/api/drive-upload-status");
+    state.driveUploadReady = !!st.driveUploadReady;
+    state.driveUpload = st.driveUpload || state.driveUpload;
+    state.driveUploadHint = st.driveUploadHint || st.driveUpload?.hint || state.driveUploadHint;
+  } catch {
+    /* pakai status dari /api/me */
+  }
+  const uploadReady = !!state.driveUploadReady;
   document.getElementById("revisiModal")?.remove();
   document.body.classList.remove("confirm-modal-open");
   const overlay = document.createElement("div");
@@ -1327,7 +1467,7 @@ async function openRevisiRowModal(ctx) {
       <div class="confirm-modal-head">
         <span class="confirm-modal-badge">Revisi</span>
         <h3 id="revisiModalTitle">Revisi baris #${escapeHtml(String(rowNo))}</h3>
-        <p class="confirm-modal-lead">Semua kolom dapat diubah. Klik × pada bukti untuk menghapus; file akan dibuang dari Google Drive saat Anda simpan.</p>
+        <p class="confirm-modal-lead">Ubah data transaksi, tambah bukti baru, atau klik × untuk mengecualikan bukti (terhapus dari Drive saat simpan).</p>
       </div>
       <form class="form-grid revisi-modal-form" id="revisiForm" enctype="multipart/form-data" novalidate>
         <label>Tanggal Pengeluaran <span class="req">*</span><input type="date" name="tanggal" required></label>
@@ -1350,16 +1490,10 @@ async function openRevisiRowModal(ctx) {
         <div class="revisi-bukti-field">
           <span class="revisi-bukti-label">Bukti transaksi</span>
           <input type="hidden" name="bukti" id="revisiBuktiHidden">
+          <span class="form-hint revisi-bukti-list-hint">Bukti yang sudah tersimpan — klik × untuk mengecualikan.</span>
           <ul class="revisi-bukti-list" id="revisiBuktiList" aria-live="polite"></ul>
-          <span class="form-hint">Daftar nama file dari Drive. Klik × untuk mengecualikan; berlaku setelah <strong>Simpan revisi</strong>.</span>
+          ${revisiBuktiAddSectionHtml(uploadReady)}
         </div>
-        ${
-          state.driveUploadReady
-            ? `<label>Tambah file bukti baru<input type="file" name="buktiFiles" accept="image/*,application/pdf" multiple></label>`
-            : state.driveUpload?.oauthConnectUrl && canConnectDriveOAuth()
-              ? `<p class="inline-message">Untuk menghapus bukti otomatis di Drive, <a href="${state.driveUpload.oauthConnectUrl}">hubungkan Google Drive</a> (admin).</p>`
-              : ""
-        }
         <label>Nama PIC <span class="req">*</span><input type="text" name="pic" required></label>
       </form>
       <div id="revisiFormMsg" class="inline-message hidden"></div>
@@ -1419,21 +1553,32 @@ async function openRevisiRowModal(ctx) {
   const keptBuktiItems = revisiBuktiItemsFromPayload(payload, buktiFilesFromApi);
   const refreshBuktiList = () => renderRevisiBuktiList(buktiList, buktiHidden, keptBuktiItems, refreshBuktiList);
   refreshBuktiList();
+  const pendingListEl = form.querySelector("#revisiBuktiPending");
+  const uploadBinding = uploadReady
+    ? bindRevisiBuktiFileUpload(form, pendingListEl, () => keptBuktiItems.length)
+    : null;
+  bindRevisiBuktiLinkPaste(form, keptBuktiItems, refreshBuktiList);
   form.addEventListener("submit", async e => {
     e.preventDefault();
     if (!form.checkValidity()) {
       form.reportValidity();
       return;
     }
-    const buktiFilesInput = form.querySelector('[name="buktiFiles"]');
-    const hasNewFiles = (buktiFilesInput?.files?.length || 0) > 0;
+    const hasNewFiles = (uploadBinding?.count() || 0) > 0;
     const hasKept = String(buktiHidden?.value || "").trim().length > 0;
     if (!hasKept && !hasNewFiles) {
       msg.className = "inline-message error";
-      msg.textContent = "Minimal satu bukti harus ada (sisakan gambar atau unggah file baru).";
+      msg.textContent = "Minimal satu bukti harus ada (sisakan bukti, unggah file, atau tambah link).";
       msg.classList.remove("hidden");
       return;
     }
+    if (keptBuktiItems.length + (uploadBinding?.count() || 0) > MAX_BUKTI_PER_TX) {
+      msg.className = "inline-message error";
+      msg.textContent = `Total bukti tidak boleh lebih dari ${MAX_BUKTI_PER_TX} file.`;
+      msg.classList.remove("hidden");
+      return;
+    }
+    uploadBinding?.sync();
     const picked = fieldVal(form, "category");
     const fd = new FormData(form);
     if (picked === OTHER_CATEGORY) {
