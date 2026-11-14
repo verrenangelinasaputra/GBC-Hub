@@ -69,7 +69,7 @@ const {
   peekUploadFolderCache,
   invalidateUploadFolderCache
 } = require("./lib/driveUpload");
-const { fetchDriveBuktiPreview } = require("./lib/driveBuktiExport");
+const { fetchDriveBuktiPreview, fetchDriveBuktiMeta } = require("./lib/driveBuktiExport");
 const { renameBuktiFilesForPayload } = require("./lib/driveBuktiRename");
 const { syncBuktiFilesToEntityDrive, removeBuktiFromEntityFolder } = require("./lib/driveBuktiEntitySync");
 const { trashBuktiDriveFiles } = require("./lib/driveBuktiDelete");
@@ -892,6 +892,22 @@ function picFromSessionUser(user) {
   return String(user?.display_name || user?.username || "").trim();
 }
 
+async function buktiFilesMetaForPayload(buktiRaw) {
+  const ids = extractAllDriveFileIds(buktiRaw);
+  const buktiFiles = [];
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    const meta = await fetchDriveBuktiMeta(id);
+    buktiFiles.push({
+      id,
+      href: driveFileViewUrl(id),
+      name: meta?.name || `Bukti ${i + 1}`,
+      mimeType: meta?.mimeType || ""
+    });
+  }
+  return buktiFiles;
+}
+
 async function submitTransaction(req, res, kind) {
   const files = req.files || [];
   const driveUpload = await inspectUploadFolder();
@@ -1134,7 +1150,8 @@ app.patch(
 app.get("/api/kas-kecil/transactions/:rowNumber", requireAuth, attachFreshMember, requireKasKecilEdit, async (req, res) => {
   try {
     const data = await getTransactionRow("kas_kecil", req.params.rowNumber);
-    res.json({ ok: true, ...data });
+    const buktiFiles = await buktiFilesMetaForPayload(data.payload?.bukti);
+    res.json({ ok: true, ...data, buktiFiles });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message || "Gagal memuat baris." });
   }
@@ -1143,7 +1160,8 @@ app.get("/api/kas-kecil/transactions/:rowNumber", requireAuth, attachFreshMember
 app.get("/api/kas-besar/transactions/:rowNumber", requireAuth, attachFreshMember, requireKasBesarEdit, async (req, res) => {
   try {
     const data = await getTransactionRow("kas_besar", req.params.rowNumber);
-    res.json({ ok: true, ...data });
+    const buktiFiles = await buktiFilesMetaForPayload(data.payload?.bukti);
+    res.json({ ok: true, ...data, buktiFiles });
   } catch (e) {
     res.status(e.status || 500).json({ error: e.message || "Gagal memuat baris." });
   }

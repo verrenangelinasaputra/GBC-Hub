@@ -1208,65 +1208,106 @@ function bindSearchCombo(box, initialOptions, hooks = {}) {
   return { setOptions, choose, clear, input, hidden };
 }
 
-function syncRevisiBuktiHidden(hiddenInput, keptHrefs) {
-  if (!hiddenInput) return;
-  hiddenInput.value = keptHrefs.join("\n");
+function revisiBuktiItemsFromPayload(payload, buktiFiles) {
+  if (Array.isArray(buktiFiles) && buktiFiles.length) {
+    return buktiFiles.map(f => ({
+      id: f.id || driveFileIdFromPart(f.href),
+      href: f.href || (f.id ? `https://drive.google.com/file/d/${f.id}/view` : ""),
+      name: String(f.name || "").trim() || "Bukti",
+      mimeType: String(f.mimeType || "")
+    }));
+  }
+  return resolveBuktiHrefs(payload?.bukti || "").map((href, i) => ({
+    id: driveFileIdFromPart(href),
+    href,
+    name: `Bukti ${i + 1}`,
+    mimeType: ""
+  }));
 }
 
-function renderRevisiBuktiGallery(gallery, hiddenInput, keptHrefs, onChange) {
-  if (!gallery) return;
-  gallery.replaceChildren();
-  if (!keptHrefs.length) {
+function syncRevisiBuktiHidden(hiddenInput, keptItems) {
+  if (!hiddenInput) return;
+  hiddenInput.value = keptItems.map(it => it.href).filter(Boolean).join("\n");
+}
+
+function revisiBuktiTypeLabel(mimeType, name) {
+  const mime = String(mimeType || "").toLowerCase();
+  if (mime.startsWith("image/")) return "Gambar";
+  if (mime === "application/pdf") return "PDF";
+  const ext = String(name || "").split(".").pop();
+  return ext && ext.length <= 5 ? ext.toUpperCase() : "File";
+}
+
+function renderRevisiBuktiList(listEl, hiddenInput, keptItems, onChange) {
+  if (!listEl) return;
+  listEl.replaceChildren();
+  if (!keptItems.length) {
     const empty = document.createElement("p");
     empty.className = "revisi-bukti-empty";
     empty.textContent = "Belum ada bukti tersimpan. Unggah file baru di bawah.";
-    gallery.append(empty);
-    syncRevisiBuktiHidden(hiddenInput, keptHrefs);
+    listEl.append(empty);
+    syncRevisiBuktiHidden(hiddenInput, keptItems);
     return;
   }
-  keptHrefs.forEach((href, index) => {
-    const id = driveFileIdFromPart(href);
-    const tile = document.createElement("div");
-    tile.className = "revisi-bukti-tile";
+  keptItems.forEach((item, index) => {
+    const li = document.createElement("li");
+    li.className = "revisi-bukti-item";
 
-    const media = document.createElement("div");
-    media.className = "revisi-bukti-media";
-
-    if (id) {
+    const thumbWrap = document.createElement("button");
+    thumbWrap.type = "button";
+    thumbWrap.className = "revisi-bukti-thumb-btn";
+    thumbWrap.title = "Buka pratinjau";
+    const typeBadge = document.createElement("span");
+    typeBadge.className = "revisi-bukti-type";
+    typeBadge.textContent = revisiBuktiTypeLabel(item.mimeType, item.name);
+    if (item.id) {
       const img = document.createElement("img");
       img.className = "revisi-bukti-thumb";
-      img.alt = `Bukti ${index + 1}`;
+      img.alt = "";
       img.loading = "lazy";
-      img.src = `/api/export/bukti/${encodeURIComponent(id)}`;
+      img.decoding = "async";
+      img.src = `/api/export/bukti/${encodeURIComponent(item.id)}`;
       img.addEventListener("error", () => {
-        const fallback = document.createElement("span");
-        fallback.className = "revisi-bukti-fallback";
-        fallback.textContent = "PDF / pratinjau";
-        img.replaceWith(fallback);
+        img.classList.add("hidden");
+        typeBadge.classList.add("revisi-bukti-type-solo");
       });
-      media.append(img);
+      thumbWrap.append(img, typeBadge);
+      thumbWrap.addEventListener("click", () => openExternal(item.href));
     } else {
-      const fallback = document.createElement("span");
-      fallback.className = "revisi-bukti-fallback";
-      fallback.textContent = "Link bukti tidak dikenali";
-      media.append(fallback);
+      typeBadge.classList.add("revisi-bukti-type-solo");
+      thumbWrap.append(typeBadge);
     }
+
+    const meta = document.createElement("div");
+    meta.className = "revisi-bukti-meta";
+    const fname = document.createElement("span");
+    fname.className = "revisi-bukti-name";
+    fname.textContent = item.name;
+    fname.title = item.name;
+    meta.append(fname);
+
+    const open = document.createElement("a");
+    open.className = "cell-link revisi-bukti-open";
+    open.href = item.href || "#";
+    open.target = "_blank";
+    open.rel = "noopener noreferrer";
+    open.textContent = "Buka ↗";
 
     const rm = document.createElement("button");
     rm.type = "button";
-    rm.className = "revisi-bukti-remove";
-    rm.setAttribute("aria-label", `Hapus bukti ${index + 1}`);
-    rm.title = "Hapus dari transaksi & Drive saat simpan";
+    rm.className = "revisi-bukti-exclude";
+    rm.setAttribute("aria-label", `Kecualikan ${item.name}`);
+    rm.title = "Kecualikan — file dihapus dari Drive saat simpan";
     rm.textContent = "×";
     rm.addEventListener("click", () => {
-      keptHrefs.splice(index, 1);
+      keptItems.splice(index, 1);
       onChange();
     });
 
-    tile.append(media, rm);
-    gallery.append(tile);
+    li.append(thumbWrap, meta, open, rm);
+    listEl.append(li);
   });
-  syncRevisiBuktiHidden(hiddenInput, keptHrefs);
+  syncRevisiBuktiHidden(hiddenInput, keptItems);
 }
 
 async function openRevisiRowModal(ctx) {
@@ -1309,8 +1350,8 @@ async function openRevisiRowModal(ctx) {
         <div class="revisi-bukti-field">
           <span class="revisi-bukti-label">Bukti transaksi</span>
           <input type="hidden" name="bukti" id="revisiBuktiHidden">
-          <div class="revisi-bukti-grid" id="revisiBuktiGallery" aria-live="polite"></div>
-          <span class="form-hint">Klik × untuk mengecualikan gambar. Penghapusan baru berlaku setelah <strong>Simpan revisi</strong>.</span>
+          <ul class="revisi-bukti-list" id="revisiBuktiList" aria-live="polite"></ul>
+          <span class="form-hint">Daftar nama file dari Drive. Klik × untuk mengecualikan; berlaku setelah <strong>Simpan revisi</strong>.</span>
         </div>
         ${
           state.driveUploadReady
@@ -1348,9 +1389,11 @@ async function openRevisiRowModal(ctx) {
     onCommit: syncOther
   });
   let payload;
+  let buktiFilesFromApi = [];
   try {
     const data = await api(`${ctx.apiBase}/${rowNo}`);
     payload = data.payload || {};
+    buktiFilesFromApi = data.buktiFiles || [];
   } catch (e) {
     toast(e.message || "Gagal memuat baris.");
     close();
@@ -1372,11 +1415,10 @@ async function openRevisiRowModal(ctx) {
   form.querySelector('[name="sumberDana"]').value = payload.sumberDana || "";
   form.querySelector('[name="pic"]').value = payload.pic || state.user?.display_name || "";
   const buktiHidden = form.querySelector("#revisiBuktiHidden");
-  const buktiGallery = form.querySelector("#revisiBuktiGallery");
-  const keptBuktiHrefs = resolveBuktiHrefs(payload.bukti || "");
-  const refreshBuktiGallery = () =>
-    renderRevisiBuktiGallery(buktiGallery, buktiHidden, keptBuktiHrefs, refreshBuktiGallery);
-  refreshBuktiGallery();
+  const buktiList = form.querySelector("#revisiBuktiList");
+  const keptBuktiItems = revisiBuktiItemsFromPayload(payload, buktiFilesFromApi);
+  const refreshBuktiList = () => renderRevisiBuktiList(buktiList, buktiHidden, keptBuktiItems, refreshBuktiList);
+  refreshBuktiList();
   form.addEventListener("submit", async e => {
     e.preventDefault();
     if (!form.checkValidity()) {
