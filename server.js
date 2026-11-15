@@ -44,6 +44,9 @@ const {
   superAdminCombinedRecap,
   appendTransaction,
   updateTransactionRow,
+  deleteTransactionRow,
+  moveTransactionBetweenKinds,
+  transferTargetKind,
   getTransactionRow,
   extractAllDriveFileIds,
   driveFileViewUrl,
@@ -1219,6 +1222,252 @@ app.patch(
   requireKasBesarEdit,
   buktiUpload.array("buktiFiles", 5),
   (req, res) => reviseTransaction(req, res, "kas_besar")
+);
+
+async function deleteTransaction(req, res, kind) {
+  const rowNumber = Number(req.params.rowNumber);
+  if (!Number.isFinite(rowNumber) || rowNumber < 2) {
+    return res.status(400).json({ error: "Nomor baris tidak valid." });
+  }
+  let existing;
+  try {
+    existing = await getTransactionRow(kind, rowNumber);
+  } catch (e) {
+    return res.status(e.status || 500).json({ error: e.message || "Baris tidak ditemukan." });
+  }
+  const scopeError = validateMemberScopeForEdit(req.user, kind, existing.payload);
+  if (scopeError) {
+    return res.status(403).json({ error: scopeError });
+  }
+  const driveUpload = await inspectUploadFolder();
+  const buktiIds = extractAllDriveFileIds(existing.payload.bukti);
+  if (buktiIds.length && !driveUpload.ready) {
+    return res.status(503).json({
+      error:
+        "Menghapus transaksi dengan bukti membutuhkan Google Drive OAuth aktif. Hubungkan Drive (admin) atau hapus manual di spreadsheet."
+    });
+  }
+  try {
+    let driveEntityRemoved = null;
+    let driveBuktiDelete = null;
+    if (buktiIds.length) {
+      try {
+        driveEntityRemoved = await removeBuktiFromEntityFolder(
+          kind,
+          existing.payload.entitas,
+          existing.payload.bukti,
+          existing.payload
+        );
+      } catch (removeErr) {
+        console.error("delete drive bukti entity cleanup:", removeErr.message);
+        driveEntityRemoved = { removed: 0, errors: [removeErr.message] };
+      }
+      try {
+        driveBuktiDelete = await trashBuktiDriveFiles(buktiIds);
+      } catch (delErr) {
+        console.error("delete drive bukti trash:", delErr.message);
+        return res.status(delErr.status || 500).json({
+          error: delErr.message || "Gagal menghapus bukti dari Google Drive."
+        });
+      }
+    }
+    const removed = await deleteTransactionRow(kind, rowNumber);
+    let compile = null;
+    try {
+      compile = await compileAllRecap();
+    } catch (compileErr) {
+      console.error("compile after delete:", compileErr.message);
+      compile = { error: compileErr.message };
+    }
+    const parts = [];
+    if (driveEntityRemoved?.removed) {
+      parts.push(`${driveEntityRemoved.removed} salinan di folder entitas dihapus`);
+    }
+    if (driveBuktiDelete?.trashed) {
+      parts.push(`${driveBuktiDelete.trashed} bukti ke sampah Drive`);
+    }
+    const warn =
+      (driveBuktiDelete?.errors?.length || 0) + (driveEntityRemoved?.errors?.length || 0) > 0
+        ? " Beberapa langkah Drive gagal — cek log server."
+        : "";
+    res.json({
+      ok: true,
+      message: `Transaksi baris ${rowNumber} dihapus.${parts.length ? ` ${parts.join("; ")}.` : ""}${warn}`,
+      remove: removed,
+      driveBuktiDelete,
+      driveEntityRemoved,
+      compile
+    });
+  } catch (e) {
+    console.error(`${kind} delete:`, e.message);
+    res.status(e.status || 500).json({ error: e.message || "Gagal menghapus transaksi." });
+  }
+}
+
+app.delete(
+  "/api/kas-kecil/transactions/:rowNumber",
+  requireAuth,
+  attachFreshMember,
+  requireCsrf,
+  requireKasKecilEdit,
+  (req, res) => deleteTransaction(req, res, "kas_kecil")
+);
+
+app.delete(
+  "/api/kas-besar/transactions/:rowNumber",
+  requireAuth,
+  attachFreshMember,
+  requireCsrf,
+  requireKasBesarEdit,
+  (req, res) => deleteTransaction(req, res, "kas_besar")
+);
+
+function timestampFromExistingRow(existing) {
+  const tsHeader = (existing.headers || []).find(h => /^timestamp/i.test(String(h || "").trim()));
+  return tsHeader ? String(existing.row[tsHeader] ?? "").trim() : "";
+}
+
+const TRANSFER_KIND_LABEL = {
+  kas_kecil: "Kas Kecil",
+  kas_besar: "Bank"
+};
+
+async function transferTransaction(req, res, fromKind) {
+  const fromRowNumber = Number(req.params.rowNumber);
+  if (!Number.isFinite(fromRowNumber) || fromRowNumber < 2) {
+    return res.status(400).json({ error: "Nomor baris tidak valid." });
+  }
+  const toKind = transferTargetKind(fromKind);
+  if (!toKind) {
+    return res.status(400).json({ error: "Modul sumber tidak valid." });
+  }
+  let existing;
+  try {
+    existing = await getTransactionRow(fromKind, fromRowNumber);
+  } catch (e) {
+    return res.status(e.status || 500).json({ error: e.message || "Baris tidak ditemukan." });
+  }
+  const scopeError = validateMemberScopeForEdit(req.user, fromKind, existing.payload);
+  if (scopeError) {
+    return res.status(403).json({ error: scopeError });
+  }
+
+  let payload = { ...existing.payload };
+  if (payload.category === OTHER_CATEGORY && payload.categoryOther) {
+    payload.category = `${OTHER_CATEGORY} — ${payload.categoryOther}`;
+  }
+
+  const buktiIds = extractAllDriveFileIds(payload.bukti);
+  const driveUpload = await inspectUploadFolder();
+  if (buktiIds.length && !driveUpload.ready) {
+    return res.status(503).json({
+      error:
+        "Memindahkan transaksi dengan bukti membutuhkan Google Drive OAuth aktif. Hubungkan Drive (admin) atau pindahkan manual di spreadsheet."
+    });
+  }
+
+  const movedBy = picFromSessionUser(req.user);
+  const fromLabel = TRANSFER_KIND_LABEL[fromKind] || fromKind;
+  const toLabel = TRANSFER_KIND_LABEL[toKind] || toKind;
+  const revisiNote = `${movedBy} (pindah ${fromLabel} → ${toLabel})`;
+  const now = new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" });
+
+  try {
+    let driveEntityRemove = null;
+    let driveRename = null;
+    let driveEntitySync = null;
+
+    if (buktiIds.length) {
+      try {
+        driveEntityRemove = await removeBuktiFromEntityFolder(
+          fromKind,
+          payload.entitas,
+          payload.bukti,
+          payload
+        );
+      } catch (removeErr) {
+        console.error("transfer drive entity remove:", removeErr.message);
+        driveEntityRemove = { removed: 0, errors: [removeErr.message] };
+      }
+      try {
+        driveRename = await renameBuktiFilesForPayload(toKind, payload.bukti, payload);
+      } catch (renameErr) {
+        console.error("transfer drive rename:", renameErr.message);
+        driveRename = { renamed: 0, errors: [renameErr.message] };
+      }
+      try {
+        driveEntitySync = await syncBuktiFilesToEntityDrive(toKind, payload.bukti, payload);
+        if (driveEntitySync.buktiLinks?.length) {
+          payload.bukti = driveEntitySync.buktiLinks.join("\n");
+        }
+      } catch (syncErr) {
+        console.error("transfer drive entity sync:", syncErr.message);
+        driveEntitySync = { copied: 0, errors: [syncErr.message] };
+      }
+    }
+
+    const move = await moveTransactionBetweenKinds(fromKind, fromRowNumber, toKind, payload, {
+      timestamp: timestampFromExistingRow(existing),
+      revisiAt: now,
+      revisiBy: revisiNote
+    });
+
+    let compile = null;
+    try {
+      compile = await compileAllRecap();
+    } catch (compileErr) {
+      console.error("compile after transfer:", compileErr.message);
+      compile = { error: compileErr.message };
+    }
+
+    const parts = [];
+    if (driveEntityRemove?.removed) {
+      parts.push(`${driveEntityRemove.removed} salinan lama di folder entitas dihapus`);
+    }
+    if (driveRename?.renamed) parts.push(`${driveRename.renamed} bukti di-rename`);
+    if (driveEntitySync?.copied) parts.push(`${driveEntitySync.copied} bukti disalin ke folder ${toLabel}`);
+    const warn =
+      (driveRename?.errors?.length || 0) +
+        (driveEntityRemove?.errors?.length || 0) +
+        (driveEntitySync?.errors?.length || 0) >
+      0
+        ? " Beberapa langkah Drive gagal — cek log server."
+        : "";
+
+    res.json({
+      ok: true,
+      message:
+        `Transaksi dipindah dari ${fromLabel} baris ${fromRowNumber} ke ${toLabel} baris ${move.toRowNumber}.` +
+        (parts.length ? ` ${parts.join("; ")}.` : "") +
+        warn,
+      move,
+      driveEntityRemove,
+      driveRename,
+      driveEntitySync,
+      compile
+    });
+  } catch (e) {
+    console.error(`transfer ${fromKind}:`, e.message);
+    res.status(e.status || 500).json({ error: e.message || "Gagal memindahkan transaksi." });
+  }
+}
+
+app.post(
+  "/api/kas-kecil/transactions/:rowNumber/transfer",
+  requireAuth,
+  attachFreshMember,
+  requireCsrf,
+  requireKasKecilEdit,
+  (req, res) => transferTransaction(req, res, "kas_kecil")
+);
+
+app.post(
+  "/api/kas-besar/transactions/:rowNumber/transfer",
+  requireAuth,
+  attachFreshMember,
+  requireCsrf,
+  requireKasBesarEdit,
+  (req, res) => transferTransaction(req, res, "kas_besar")
 );
 
 app.get("/api/kas-kecil/transactions/:rowNumber", requireAuth, attachFreshMember, requireKasKecilEdit, async (req, res) => {

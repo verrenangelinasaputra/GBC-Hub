@@ -350,6 +350,183 @@ function fieldVal(form, name) {
   return String(el?.value ?? "").trim();
 }
 
+function buktiItemKey(item) {
+  const id = String(item?.id || "").trim();
+  if (id) return `id:${id}`;
+  return `href:${String(item?.href || item?.name || "").trim()}`;
+}
+
+function formatBuktiConfirmLine(item) {
+  const name = String(item?.name || "Bukti").trim();
+  const id = String(item?.id || "").trim();
+  if (id) return `${name} (ID …${id.slice(-8)})`;
+  const href = String(item?.href || "").trim();
+  if (href.length > 48) return `${name} — ${href.slice(0, 32)}…`;
+  return href ? `${name} — ${href}` : name;
+}
+
+function revisiPayloadFromForm(form) {
+  const picked = fieldVal(form, "category");
+  return {
+    tanggal: fieldVal(form, "tanggal"),
+    entitas: fieldVal(form, "entitas"),
+    category: picked,
+    categoryOther: picked === OTHER_CATEGORY ? fieldVal(form, "categoryOther") : "",
+    namaTransaksi: fieldVal(form, "namaTransaksi"),
+    amount: fieldVal(form, "amount"),
+    keterangan: fieldVal(form, "keterangan"),
+    dibayarkan: fieldVal(form, "dibayarkan"),
+    sumberDana: fieldVal(form, "sumberDana"),
+    pic: fieldVal(form, "pic")
+  };
+}
+
+function revisiCategoryLabel(p) {
+  if (p?.category === OTHER_CATEGORY && p?.categoryOther) {
+    return `${OTHER_CATEGORY} — ${p.categoryOther}`;
+  }
+  return String(p?.category || "—");
+}
+
+function snapshotRevisiOriginalPayload(payload) {
+  let category = payload.category || "";
+  let categoryOther = String(payload.categoryOther || "").trim();
+  const otherMatch = /^Beban lainnya\s*[—–-]\s*(.*)$/i.exec(category);
+  if (otherMatch) {
+    category = OTHER_CATEGORY;
+    categoryOther = categoryOther || String(otherMatch[1] || "").trim();
+  }
+  return {
+    tanggal: String(payload.tanggal || "").trim(),
+    entitas: String(payload.entitas || "").trim(),
+    category,
+    categoryOther,
+    namaTransaksi: String(payload.namaTransaksi || "").trim(),
+    amount: String(payload.amount ?? "").trim(),
+    keterangan: String(payload.keterangan || "").trim(),
+    dibayarkan: String(payload.dibayarkan || "").trim(),
+    sumberDana: String(payload.sumberDana || "").trim(),
+    pic: String(payload.pic || "").trim()
+  };
+}
+
+function buildRevisiFieldChanges(before, after) {
+  const rows = [];
+  const push = (label, from, to, fmt = v => String(v ?? "").trim() || "—") => {
+    const a = fmt(from);
+    const b = fmt(to);
+    if (a !== b) rows.push({ label, from: a, to: b });
+  };
+  push("Tanggal", before.tanggal, after.tanggal, formatTanggalId);
+  push("Entitas", before.entitas, after.entitas);
+  push("Kategori", before, after, revisiCategoryLabel);
+  push("Nama transaksi", before.namaTransaksi, after.namaTransaksi);
+  push("Jumlah", before.amount, after.amount, v => {
+    const n = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
+    return Number.isFinite(n) && n > 0 ? rupiah(n) : String(v ?? "").trim() || "—";
+  });
+  push("Dibayarkan kepada", before.dibayarkan, after.dibayarkan);
+  push("Sumber dana", before.sumberDana, after.sumberDana);
+  push("Keterangan", before.keterangan, after.keterangan);
+  push("PIC", before.pic, after.pic);
+  return rows;
+}
+
+function buildRevisiBuktiChangeSummary(originalBukti, keptBukti, uploadHeld) {
+  const origKeys = new Set(originalBukti.map(buktiItemKey));
+  const keptKeys = new Set(keptBukti.map(buktiItemKey));
+  const removed = originalBukti.filter(i => !keptKeys.has(buktiItemKey(i)));
+  const kept = keptBukti.filter(i => origKeys.has(buktiItemKey(i)));
+  const addedLinks = keptBukti.filter(i => !origKeys.has(buktiItemKey(i)));
+  const addedFiles = (uploadHeld || []).map(f => String(f.name || "file").trim()).filter(Boolean);
+  return { removed, kept, addedLinks, addedFiles };
+}
+
+function buktiChangeListHtml(label, items, emptyNote) {
+  if (!items.length) return "";
+  const list = items.map(i => `<li>${escapeHtml(typeof i === "string" ? i : formatBuktiConfirmLine(i))}</li>`).join("");
+  return `<p class="confirm-bukti-change-head"><strong>${escapeHtml(label)}</strong></p><ul class="confirm-bukti-list">${list}</ul>`;
+}
+
+/** Modal konfirmasi sebelum simpan revisi — ringkasan field + bukti (dari / ke). */
+function showRevisiSaveConfirmModal(summary) {
+  return new Promise(resolve => {
+    document.getElementById("revisiSaveConfirmModal")?.remove();
+    const fieldRows = summary.fieldChanges || [];
+    const b = summary.bukti || {};
+    const buktiParts = [
+      buktiChangeListHtml(
+        "Dihapus (ke sampah Drive saat simpan):",
+        b.removed || [],
+        "Tidak ada bukti yang dihapus."
+      ),
+      buktiChangeListHtml("Tetap disimpan:", b.kept || [], ""),
+      buktiChangeListHtml("Baru (link ditambahkan):", b.addedLinks || [], ""),
+      buktiChangeListHtml("Baru (file akan di-upload):", b.addedFiles || [], "")
+    ].filter(Boolean);
+    const buktiUnchanged =
+      !b.removed?.length && !b.addedLinks?.length && !b.addedFiles?.length && (b.kept?.length || 0) > 0;
+    const buktiHtml = buktiUnchanged
+      ? `<p class="confirm-bukti-unchanged">Bukti tidak berubah (${b.kept.length} file).</p>`
+      : `<div class="confirm-bukti-changes">${buktiParts.join("")}</div>`;
+
+    const fieldHtml =
+      fieldRows.length > 0
+        ? fieldRows
+            .map(
+              r => `<div class="confirm-row confirm-row-change"><dt>${escapeHtml(r.label)}</dt><dd><span class="confirm-from">${escapeHtml(r.from)}</span> <span class="confirm-arrow" aria-hidden="true">→</span> <span class="confirm-to">${escapeHtml(r.to)}</span></dd></div>`
+            )
+            .join("")
+        : `<p class="confirm-bukti-unchanged">Tidak ada perubahan pada field data (hanya bukti berubah).</p>`;
+
+    const overlay = document.createElement("div");
+    overlay.id = "revisiSaveConfirmModal";
+    overlay.className = "confirm-modal";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-labelledby", "revisiSaveConfirmTitle");
+    overlay.innerHTML = `
+      <button type="button" class="confirm-modal-backdrop" aria-label="Tutup"></button>
+      <div class="confirm-modal-panel">
+        <div class="confirm-modal-head">
+          <span class="confirm-modal-badge">Revisi</span>
+          <h3 id="revisiSaveConfirmTitle">Konfirmasi simpan revisi</h3>
+          <p class="confirm-modal-lead">Periksa perubahan untuk <strong>baris #${escapeHtml(String(summary.rowNo || ""))}</strong> sebelum data disimpan ke spreadsheet dan Drive.</p>
+        </div>
+        <h4 class="confirm-subhead">Perubahan data</h4>
+        <dl class="confirm-summary">${fieldHtml}</dl>
+        <h4 class="confirm-subhead">Bukti transaksi</h4>
+        <div class="confirm-summary confirm-summary-bukti">${buktiHtml}</div>
+        <p class="confirm-modal-note">Bukti yang dihapus (×) akan dipindahkan ke sampah Google Drive. Upload/link baru aktif setelah Anda klik simpan.</p>
+        <div class="confirm-modal-actions">
+          <button type="button" class="btn btn-soft btn-full-mobile" id="revisiSaveConfirmCancel">Batal, periksa lagi</button>
+          <button type="button" class="btn btn-primary btn-full-mobile" id="revisiSaveConfirmOk">Ya, simpan revisi</button>
+        </div>
+      </div>`;
+
+    document.body.append(overlay);
+    document.body.classList.add("confirm-modal-open");
+
+    let done = false;
+    const finish = ok => {
+      if (done) return;
+      done = true;
+      document.removeEventListener("keydown", onKey);
+      overlay.remove();
+      document.body.classList.remove("confirm-modal-open");
+      resolve(ok);
+    };
+    const onKey = ev => {
+      if (ev.key === "Escape") finish(false);
+    };
+    document.addEventListener("keydown", onKey);
+    overlay.querySelector("#revisiSaveConfirmCancel").addEventListener("click", () => finish(false));
+    overlay.querySelector(".confirm-modal-backdrop").addEventListener("click", () => finish(false));
+    overlay.querySelector("#revisiSaveConfirmOk").addEventListener("click", () => finish(true));
+    requestAnimationFrame(() => overlay.querySelector("#revisiSaveConfirmOk")?.focus());
+  });
+}
+
 /** Modal verifikasi sebelum submit transaksi (hindari kepencet). */
 function showTxSubmitConfirmModal(summary) {
   return new Promise(resolve => {
@@ -1467,7 +1644,7 @@ async function openRevisiRowModal(ctx) {
       <div class="confirm-modal-head">
         <span class="confirm-modal-badge">Revisi</span>
         <h3 id="revisiModalTitle">Revisi baris #${escapeHtml(String(rowNo))}</h3>
-        <p class="confirm-modal-lead">Ubah data transaksi, tambah bukti baru, atau klik × untuk mengecualikan bukti (terhapus dari Drive saat simpan).</p>
+        <p class="confirm-modal-lead">Ubah data transaksi, tambah bukti baru, atau klik × untuk mengecualikan bukti (terhapus dari Drive saat simpan). Transaksi juga bisa dipindah ke tab Bank / Kas Kecil lain.</p>
       </div>
       <form class="form-grid revisi-modal-form" id="revisiForm" enctype="multipart/form-data" novalidate>
         <label>Tanggal Pengeluaran <span class="req">*</span><input type="date" name="tanggal" required></label>
@@ -1497,7 +1674,10 @@ async function openRevisiRowModal(ctx) {
         <label>Nama PIC <span class="req">*</span><input type="text" name="pic" required></label>
       </form>
       <div id="revisiFormMsg" class="inline-message hidden"></div>
-      <div class="confirm-modal-actions">
+      <div class="confirm-modal-actions revisi-modal-actions">
+        <button type="button" class="btn btn-danger btn-sm" id="revisiDeleteBtn" disabled title="Hapus baris transaksi dari spreadsheet">Hapus transaksi</button>
+        <button type="button" class="btn btn-soft btn-sm" id="revisiTransferBtn" disabled title="Pindah ke modul Bank atau Kas Kecil lain">Pindah ke …</button>
+        <span class="revisi-modal-actions-spacer"></span>
         <button type="button" class="btn btn-soft" data-close>Batal</button>
         <button type="submit" form="revisiForm" class="btn btn-primary">Simpan revisi</button>
       </div>
@@ -1522,12 +1702,22 @@ async function openRevisiRowModal(ctx) {
   const combo = bindSearchCombo(overlay.querySelector("#revisiCategoryCombo"), ctx.cats, {
     onCommit: syncOther
   });
+  const deleteBtn = overlay.querySelector("#revisiDeleteBtn");
+  const transferBtn = overlay.querySelector("#revisiTransferBtn");
+  const transferToLabel = ctx.isBesar ? "Kas Kecil" : "Bank";
+  const transferFromLabel = ctx.isBesar ? "Bank" : "Kas Kecil";
+  if (transferBtn) {
+    transferBtn.textContent = `Pindah ke ${transferToLabel}`;
+    transferBtn.title = `Pindah baris dari ${transferFromLabel} ke ${transferToLabel}`;
+  }
   let payload;
   let buktiFilesFromApi = [];
   try {
     const data = await api(`${ctx.apiBase}/${rowNo}`);
     payload = data.payload || {};
     buktiFilesFromApi = data.buktiFiles || [];
+    if (deleteBtn) deleteBtn.disabled = false;
+    if (transferBtn) transferBtn.disabled = false;
   } catch (e) {
     toast(e.message || "Gagal memuat baris.");
     close();
@@ -1551,6 +1741,8 @@ async function openRevisiRowModal(ctx) {
   const buktiHidden = form.querySelector("#revisiBuktiHidden");
   const buktiList = form.querySelector("#revisiBuktiList");
   const keptBuktiItems = revisiBuktiItemsFromPayload(payload, buktiFilesFromApi);
+  const originalBuktiItems = keptBuktiItems.map(it => ({ ...it }));
+  const originalSnapshot = snapshotRevisiOriginalPayload(payload);
   const refreshBuktiList = () => renderRevisiBuktiList(buktiList, buktiHidden, keptBuktiItems, refreshBuktiList);
   refreshBuktiList();
   const pendingListEl = form.querySelector("#revisiBuktiPending");
@@ -1558,6 +1750,71 @@ async function openRevisiRowModal(ctx) {
     ? bindRevisiBuktiFileUpload(form, pendingListEl, () => keptBuktiItems.length)
     : null;
   bindRevisiBuktiLinkPaste(form, keptBuktiItems, refreshBuktiList);
+  transferBtn?.addEventListener("click", async () => {
+    const tx =
+      form.querySelector('[name="namaTransaksi"]')?.value?.trim() ||
+      payload?.namaTransaksi ||
+      `#${rowNo}`;
+    const noDestAccess =
+      ctx.isBesar && !state.permissions?.editKasKecil
+        ? "\n\nAnda tidak punya akses revisi Kas Kecil — setelah pindah, transaksi tidak akan tampil lagi di aplikasi untuk akun Anda."
+        : !ctx.isBesar && !state.permissions?.editKasBesar
+          ? "\n\nAnda tidak punya akses revisi Bank — setelah pindah, transaksi tidak akan tampil lagi di aplikasi untuk akun Anda."
+          : "";
+    if (
+      !window.confirm(
+        `Pindahkan "${tx}" dari ${transferFromLabel} (baris ${rowNo}) ke ${transferToLabel}?\n\n` +
+          `Baris di ${transferFromLabel} akan dihapus; data muncul sebagai baris baru di ${transferToLabel}. ` +
+          `Sumber dana tetap sama. Bukti Drive disesuaikan (folder ${transferToLabel}).` +
+          noDestAccess
+      )
+    ) {
+      return;
+    }
+    msg.className = "inline-message";
+    msg.textContent = `Memindahkan ke ${transferToLabel}…`;
+    msg.classList.remove("hidden");
+    try {
+      const data = await api(`${ctx.apiBase}/${rowNo}/transfer`, {
+        method: "POST",
+        progressLabel: `Pindah ke ${transferToLabel} & Drive…`
+      });
+      toast(data.message || "Transaksi dipindah.");
+      close();
+      ctx.onDone?.();
+    } catch (err) {
+      msg.className = "inline-message error";
+      msg.textContent = err.message;
+    }
+  });
+  deleteBtn?.addEventListener("click", async () => {
+    const tx =
+      form.querySelector('[name="namaTransaksi"]')?.value?.trim() ||
+      payload?.namaTransaksi ||
+      `#${rowNo}`;
+    if (
+      !window.confirm(
+        `Hapus transaksi "${tx}" (baris ${rowNo})?\n\nBaris spreadsheet akan dihapus. Bukti di Drive dipindahkan ke sampah. Tindakan tidak bisa dibatalkan dari aplikasi.`
+      )
+    ) {
+      return;
+    }
+    msg.className = "inline-message";
+    msg.textContent = "Menghapus transaksi & bukti…";
+    msg.classList.remove("hidden");
+    try {
+      const data = await api(`${ctx.apiBase}/${rowNo}`, {
+        method: "DELETE",
+        progressLabel: "Menghapus transaksi & Drive…"
+      });
+      toast(data.message || "Transaksi dihapus.");
+      close();
+      ctx.onDone?.();
+    } catch (err) {
+      msg.className = "inline-message error";
+      msg.textContent = err.message;
+    }
+  });
   form.addEventListener("submit", async e => {
     e.preventDefault();
     if (!form.checkValidity()) {
@@ -1580,6 +1837,19 @@ async function openRevisiRowModal(ctx) {
     }
     uploadBinding?.sync();
     const picked = fieldVal(form, "category");
+    const nextPayload = revisiPayloadFromForm(form);
+    const buktiSummary = buildRevisiBuktiChangeSummary(
+      originalBuktiItems,
+      keptBuktiItems,
+      uploadBinding?.held || []
+    );
+    const confirmed = await showRevisiSaveConfirmModal({
+      rowNo,
+      fieldChanges: buildRevisiFieldChanges(originalSnapshot, nextPayload),
+      bukti: buktiSummary
+    });
+    if (!confirmed) return;
+
     const fd = new FormData(form);
     if (picked === OTHER_CATEGORY) {
       fd.set("category", OTHER_CATEGORY);

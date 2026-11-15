@@ -45,11 +45,22 @@ a.nav-link{text-decoration:none}
 .confirm-row dd{margin:0;color:#34415a;font-weight:500;word-break:break-word}
 .confirm-bukti-list{margin:0;padding-left:18px;font-size:12px;line-height:1.55}
 .confirm-bukti-list li{margin:3px 0}
+.confirm-subhead{margin:16px 0 8px;font:700 13px Manrope,sans-serif;color:#42506a}
+.confirm-summary-bukti{padding-top:10px}
+.confirm-bukti-changes{display:grid;gap:8px}
+.confirm-bukti-change-head{margin:0 0 4px;font-size:12px;font-weight:700;color:#5a6882}
+.confirm-bukti-unchanged{margin:0;font-size:13px;color:#6f7c93}
+.confirm-row-change dd{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:baseline}
+.confirm-from{color:#8a96ab;text-decoration:line-through;font-weight:500}
+.confirm-arrow{color:#3458d4;font-weight:800}
+.confirm-to{color:#18243b;font-weight:700}
 .confirm-modal-note{margin:12px 0 0;font-size:12px;line-height:1.6;color:#8792a6}
 .confirm-modal-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;justify-content:flex-end}
 .confirm-modal-panel.revisi-modal-panel{width:min(640px,100%);max-height:min(92vh,860px)}
 .revisi-modal-form{margin:0;padding:0;max-height:min(62vh,560px);overflow:auto;padding-right:4px;padding-bottom:8px}
 .revisi-modal-panel .combo-menu{z-index:10050}
+.revisi-modal-actions{width:100%;align-items:center}
+.revisi-modal-actions-spacer{flex:1 1 auto;min-width:8px}
 .revisi-bukti-field{display:grid;gap:8px}
 .revisi-bukti-label{font-size:13px;font-weight:700;color:#6f7c93}
 .revisi-bukti-list{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:8px;max-width:100%}
