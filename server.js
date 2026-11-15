@@ -1065,7 +1065,7 @@ async function reviseTransaction(req, res, kind) {
   }
   const payload = normalizeTransactionBody(req.body);
   payload.tanggal = resolveTanggalPengeluaran(payload.tanggal);
-  payload.pic = String(payload.pic || existing.payload.pic || picFromSessionUser(req.user)).trim();
+  payload.pic = picFromSessionUser(req.user) || String(payload.pic || existing.payload.pic || "").trim();
   const buktiBaseline = payload.bukti || existing.payload.bukti;
   const validationError = validateTransactionPayload(
     { ...payload, bukti: buktiBaseline },

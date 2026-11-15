@@ -1671,7 +1671,10 @@ async function openRevisiRowModal(ctx) {
           <ul class="revisi-bukti-list" id="revisiBuktiList" aria-live="polite"></ul>
           ${revisiBuktiAddSectionHtml(uploadReady)}
         </div>
-        <label>Nama PIC <span class="req">*</span><input type="text" name="pic" required></label>
+        <label>Nama PIC <span class="req">*</span>
+          <input type="text" name="pic" value="${escapeHtml(state.user?.display_name || state.user?.username || "")}" readonly required class="input-locked" tabindex="-1">
+          <span class="form-hint">Terisi otomatis dari akun yang login (tidak bisa diubah saat revisi).</span>
+        </label>
       </form>
       <div id="revisiFormMsg" class="inline-message hidden"></div>
       <div class="confirm-modal-actions revisi-modal-actions">
@@ -1741,7 +1744,9 @@ async function openRevisiRowModal(ctx) {
   form.querySelector('[name="keterangan"]').value = payload.keterangan || "";
   form.querySelector('[name="dibayarkan"]').value = payload.dibayarkan || "";
   form.querySelector('[name="sumberDana"]').value = payload.sumberDana || "";
-  form.querySelector('[name="pic"]').value = payload.pic || state.user?.display_name || "";
+  const picLocked = state.user?.display_name || state.user?.username || "";
+  const picInput = form.querySelector('[name="pic"]');
+  if (picInput && picLocked) picInput.value = picLocked;
   const buktiHidden = form.querySelector("#revisiBuktiHidden");
   const buktiList = form.querySelector("#revisiBuktiList");
   const keptBuktiItems = revisiBuktiItemsFromPayload(payload, buktiFilesFromApi);
