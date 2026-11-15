@@ -1675,11 +1675,15 @@ async function openRevisiRowModal(ctx) {
       </form>
       <div id="revisiFormMsg" class="inline-message hidden"></div>
       <div class="confirm-modal-actions revisi-modal-actions">
-        <button type="button" class="btn btn-danger btn-sm" id="revisiDeleteBtn" disabled title="Hapus baris transaksi dari spreadsheet">Hapus transaksi</button>
-        <button type="button" class="btn btn-soft btn-sm" id="revisiTransferBtn" disabled title="Pindah ke modul Bank atau Kas Kecil lain">Pindah ke …</button>
-        <span class="revisi-modal-actions-spacer"></span>
-        <button type="button" class="btn btn-soft" data-close>Batal</button>
-        <button type="submit" form="revisiForm" class="btn btn-primary">Simpan revisi</button>
+        <div class="revisi-modal-actions-group revisi-modal-actions-start">
+          <button type="button" class="btn btn-danger btn-sm" id="revisiDeleteBtn" disabled title="Hapus baris transaksi dari spreadsheet">Hapus transaksi</button>
+          <button type="button" class="btn btn-soft btn-sm" id="revisiTransferBtn" disabled title="Pindah ke modul Bank atau Kas Kecil lain">Pindah ke …</button>
+        </div>
+        <span class="revisi-modal-actions-spacer" aria-hidden="true"></span>
+        <div class="revisi-modal-actions-group revisi-modal-actions-end">
+          <button type="button" class="btn btn-soft btn-sm" data-close>Batal</button>
+          <button type="submit" form="revisiForm" class="btn btn-primary btn-sm">Simpan revisi</button>
+        </div>
       </div>
     </div>`;
   document.body.append(overlay);

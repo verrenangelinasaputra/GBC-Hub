@@ -59,8 +59,10 @@ a.nav-link{text-decoration:none}
 .confirm-modal-panel.revisi-modal-panel{width:min(640px,100%);max-height:min(92vh,860px)}
 .revisi-modal-form{margin:0;padding:0;max-height:min(62vh,560px);overflow:auto;padding-right:4px;padding-bottom:8px}
 .revisi-modal-panel .combo-menu{z-index:10050}
-.revisi-modal-actions{width:100%;align-items:center}
-.revisi-modal-actions-spacer{flex:1 1 auto;min-width:8px}
+.revisi-modal-actions{width:100%;align-items:center;justify-content:space-between;flex-wrap:wrap;row-gap:10px}
+.revisi-modal-actions-group{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.revisi-modal-actions .btn{margin:0;min-height:38px;display:inline-flex;align-items:center;justify-content:center;line-height:1.25}
+.revisi-modal-actions-spacer{flex:1 1 12px;min-width:12px;align-self:center;height:1px}
 .revisi-bukti-field{display:grid;gap:8px}
 .revisi-bukti-label{font-size:13px;font-weight:700;color:#6f7c93}
 .revisi-bukti-list{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:8px;max-width:100%}
