@@ -314,9 +314,29 @@ function validateRegisterFields(body) {
   if (pwErr) return { error: pwErr };
   return { name, username: usernameCheck.username, email, phone, password };
 }
+function requestWantsHtml(req) {
+  const accept = String(req.headers.accept || "");
+  return req.method === "GET" && (accept.includes("text/html") || !accept.includes("application/json"));
+}
+
 function requireAuth(req, res, next) {
   const session = sessionFor(req);
   if (!session) return res.status(401).json({ error: "Silakan login terlebih dahulu." });
+  req.user = session.user;
+  req.sessionCsrf = session.csrf;
+  next();
+}
+
+/** GET browser (tombol Hubungkan Drive): redirect ke login, bukan JSON 401 "UNAUTHORIZED". */
+function requireAuthBrowser(req, res, next) {
+  const session = sessionFor(req);
+  if (!session) {
+    if (requestWantsHtml(req)) {
+      const nextPath = encodeURIComponent(req.originalUrl || req.url);
+      return res.redirect(`/login?next=${nextPath}`);
+    }
+    return res.status(401).json({ error: "Silakan login terlebih dahulu." });
+  }
   req.user = session.user;
   req.sessionCsrf = session.csrf;
   next();
@@ -565,7 +585,24 @@ function oauthStateAccepted(req) {
   return verifyOAuthState(queryState);
 }
 
-app.get("/api/oauth/drive/connect", requireAuth, requireRoles("super_admin", "admin"), (req, res) => {
+function requireAdminRolesBrowser(...roles) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: "Silakan login terlebih dahulu." });
+    if (!roles.includes(req.user.role)) {
+      if (requestWantsHtml(req)) {
+        return res
+          .status(403)
+          .send(
+            "<p>Hanya <strong>admin</strong> / <strong>super admin</strong> yang boleh menghubungkan Google Drive. Login dengan akun tersebut lalu coba lagi.</p>"
+          );
+      }
+      return res.status(403).json({ error: "Anda tidak memiliki akses ke fitur ini." });
+    }
+    next();
+  };
+}
+
+app.get("/api/oauth/drive/connect", requireAuthBrowser, requireAdminRolesBrowser("super_admin", "admin"), (req, res) => {
   if (!oauthClientConfigured()) {
     return res.status(503).send(
       "OAuth belum siap. Isi GOOGLE_OAUTH_CLIENT_ID dan GOOGLE_OAUTH_CLIENT_SECRET di .env — lihat docs/DRIVE_BUKTI_SETUP.md"

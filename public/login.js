@@ -1,3 +1,12 @@
+function safeLoginNext(raw) {
+  const s = String(raw || "").trim();
+  if (!s.startsWith("/") || s.startsWith("//")) return "";
+  if (s.includes("..") || s.includes("\\")) return "";
+  return s;
+}
+
+const loginNext = safeLoginNext(new URLSearchParams(window.location.search).get("next"));
+
 const form = document.getElementById("loginForm");
 const msg = document.getElementById("loginMessage");
 const submitBtn = document.getElementById("loginSubmit");
@@ -49,7 +58,7 @@ form.addEventListener("submit", async e => {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Login gagal.");
     persistRememberLogin(login, rememberMe);
-    window.location.href = data.redirect || "/";
+    window.location.href = loginNext || data.redirect || "/";
   } catch (err) {
     msg.textContent = err.message;
     msg.className = "inline-message error";
