@@ -58,6 +58,7 @@ const SUMBER_DANA_BANK = [
   "Bank Joseph — 110112",
   "Bank Lie Hok Ting — 110109",
   "Bank MJL — 110117",
+  "Bank Ochi — 110129",
   "Bank Rifki — 110120",
   "Bank Rizky — 110115",
   "Bank Yanti — 110114",

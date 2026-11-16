@@ -53,9 +53,27 @@
     if (label && message) label.textContent = message;
   }
 
+  /** Langkah terukur (mis. batch: transaksi 3 dari 10). */
+  function progressSetStep(current, total, message) {
+    ensure();
+    if (active < 1) active = 1;
+    syncBody();
+    bar.classList.add("active");
+    bar.setAttribute("aria-hidden", "false");
+    fill.classList.remove("done");
+    const t = Math.max(1, Number(total) || 1);
+    const c = Math.max(0, Math.min(t, Number(current) || 0));
+    const pct = Math.round((c / t) * 100);
+    const w = Math.max(12, Math.min(98, pct || 12));
+    fill.style.width = `${w}%`;
+    bar.setAttribute("aria-valuenow", String(pct));
+    if (message) label.textContent = message;
+  }
+
   global.progressStart = progressStart;
   global.progressDone = progressDone;
   global.progressMessage = progressMessage;
+  global.progressSetStep = progressSetStep;
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => progressStart("Memuat halaman…"));

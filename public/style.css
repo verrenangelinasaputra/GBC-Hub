@@ -57,12 +57,29 @@ a.nav-link{text-decoration:none}
 .confirm-modal-note{margin:12px 0 0;font-size:12px;line-height:1.6;color:#8792a6}
 .confirm-modal-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;justify-content:flex-end}
 .confirm-modal-panel.revisi-modal-panel{width:min(640px,100%);max-height:min(92vh,860px)}
+.confirm-modal-panel.batch-confirm-panel{width:min(720px,100%);max-height:min(92vh,860px)}
+.batch-confirm-table-wrap{padding:0;overflow:auto}
+.batch-confirm-table{width:100%;border-collapse:collapse;font-size:12px;line-height:1.45}
+.batch-confirm-table th,.batch-confirm-table td{padding:8px 10px;border-bottom:1px solid #e8ecf5;text-align:left;vertical-align:top}
+.batch-confirm-table thead th{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#6b7894;background:#eef2fa;position:sticky;top:0}
+.batch-confirm-table tbody th{font-weight:700;color:#405cc6;white-space:nowrap}
+.batch-confirm-bukti{max-width:160px;word-break:break-word}
 .revisi-modal-form{margin:0;padding:0;max-height:min(62vh,560px);overflow:auto;padding-right:4px;padding-bottom:8px}
 .revisi-modal-panel .combo-menu{z-index:10050}
 .revisi-modal-actions{width:100%;align-items:center;justify-content:space-between;flex-wrap:wrap;row-gap:10px}
 .revisi-modal-actions-group{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .revisi-modal-actions .btn{margin:0;min-height:38px;display:inline-flex;align-items:center;justify-content:center;line-height:1.25}
 .revisi-modal-actions-spacer{flex:1 1 12px;min-width:12px;align-self:center;height:1px}
+.form-mode-switch{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.form-mode-btn.is-active{background:#eef2ff;border-color:#c5d0f8;color:#243eac;font-weight:700}
+.batch-intro{margin:0 0 4px}
+.batch-lines{display:grid;gap:14px;margin:8px 0}
+.batch-tx-card{border:1px solid #e3e8f2;border-radius:12px;padding:14px 14px 12px;background:#fafbfd}
+.batch-tx-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.batch-tx-card-head strong{font:800 14px Manrope,sans-serif;color:#34415a}
+.batch-tx-grid{gap:10px}
+.batch-span-2{grid-column:1/-1}
+.batch-toolbar{margin:4px 0 8px}
 .revisi-bukti-field{display:grid;gap:8px}
 .revisi-bukti-label{font-size:13px;font-weight:700;color:#6f7c93}
 .revisi-bukti-list{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:8px;max-width:100%}

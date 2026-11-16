@@ -93,6 +93,17 @@ const buktiUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024, files: 5 }
 });
+
+const BATCH_TX_MAX = 10;
+const batchBuktiUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: BATCH_TX_MAX * 5 + 2 }
+});
+
+const batchBuktiFields = Array.from({ length: BATCH_TX_MAX }, (_, i) => ({
+  name: `bukti_${i}`,
+  maxCount: 5
+}));
 const { geminiConfigured, generateOwnerInsights } = require("./lib/owner-insights");
 const { logGeminiStartupHint } = require("./lib/gemini");
 
@@ -1029,6 +1040,151 @@ async function submitTransaction(req, res, kind) {
     res.status(e.status || 500).json({ error: e.message || "Gagal menyimpan transaksi." });
   }
 }
+
+function indexFilesByField(files) {
+  const map = {};
+  for (const f of files || []) {
+    const key = String(f.fieldname || "");
+    if (!map[key]) map[key] = [];
+    map[key].push(f);
+  }
+  return map;
+}
+
+async function submitBatchTransactions(req, res, kind) {
+  const entitas = String(req.body?.entitas || "").trim();
+  if (!entitas) {
+    return res.status(400).json({ error: "Entitas wajib (satu entitas untuk seluruh batch)." });
+  }
+
+  let items;
+  try {
+    const raw = req.body?.items;
+    items = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return res.status(400).json({ error: "Data batch tidak valid (JSON items)." });
+  }
+  if (!Array.isArray(items) || items.length < 1 || items.length > BATCH_TX_MAX) {
+    return res.status(400).json({ error: `Kirim 1–${BATCH_TX_MAX} transaksi per batch.` });
+  }
+
+  const driveUpload = await inspectUploadFolder();
+  const filesByField = indexFilesByField(req.files);
+  const saved = [];
+  const failed = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const line = items[i] || {};
+    const payload = normalizeTransactionBody({
+      ...line,
+      entitas,
+      pic: picFromSessionUser(req.user)
+    });
+    payload.tanggal = resolveTanggalPengeluaran(payload.tanggal);
+    const files = filesByField[`bukti_${i}`] || [];
+
+    let validationError = validateTransactionPayload(payload, kind, files, driveUpload.ready);
+    if (validationError) {
+      failed.push({ index: i + 1, error: validationError });
+      continue;
+    }
+    if (payload.category === OTHER_CATEGORY) {
+      payload.category = `${OTHER_CATEGORY} — ${payload.categoryOther}`;
+    }
+    const scopeError = validateMemberScopeForSubmit(req.user, kind, payload);
+    if (scopeError) {
+      failed.push({ index: i + 1, error: scopeError });
+      continue;
+    }
+
+    try {
+      if (files.length) {
+        const links = await uploadBuktiFiles(files, {
+          nameForFile: (file, index, total) =>
+            buktiDriveFileName(kind, payload, file.originalname, index, total)
+        });
+        payload.bukti = [payload.bukti, links.join("\n")].filter(Boolean).join("\n");
+      }
+      const appendResult = await appendTransaction(kind, payload);
+      saved.push({ index: i + 1, append: appendResult, namaTransaksi: payload.namaTransaksi });
+    } catch (e) {
+      console.error(`${kind} batch line ${i + 1}:`, e.message);
+      failed.push({ index: i + 1, error: e.message || "Gagal menyimpan baris." });
+    }
+  }
+
+  let compile = null;
+  if (saved.length) {
+    try {
+      compile = await compileAllRecap();
+    } catch (compileErr) {
+      console.error("compile after batch submit:", compileErr.message);
+      compile = { error: compileErr.message };
+    }
+  }
+
+  const parts = [];
+  if (saved.length) parts.push(`${saved.length} transaksi tersimpan`);
+  if (failed.length) parts.push(`${failed.length} gagal`);
+  const message = parts.length ? `${parts.join(", ")}. Rekap diperbarui sekali di akhir.` : "Tidak ada transaksi yang tersimpan.";
+
+  res.status(saved.length ? 200 : 400).json({
+    ok: saved.length > 0,
+    message,
+    savedCount: saved.length,
+    failedCount: failed.length,
+    saved,
+    failed,
+    compile
+  });
+}
+
+app.post(
+  "/api/kas-kecil/transactions/batch",
+  requireAuth,
+  attachFreshMember,
+  requireCsrf,
+  requireKasKecilSubmit,
+  (req, res, next) => batchBuktiUpload.fields(batchBuktiFields)(req, res, next),
+  (req, res) => submitBatchTransactions(req, res, "kas_kecil")
+);
+
+app.post(
+  "/api/kas-besar/transactions/batch",
+  requireAuth,
+  attachFreshMember,
+  requireCsrf,
+  requireKasBesarSubmit,
+  (req, res, next) => batchBuktiUpload.fields(batchBuktiFields)(req, res, next),
+  (req, res) => submitBatchTransactions(req, res, "kas_besar")
+);
+
+async function compileRecapAfterSubmit(req, res) {
+  try {
+    const compile = await compileAllRecap();
+    res.json({ ok: true, message: "Rekap diperbarui.", compile });
+  } catch (e) {
+    console.error("compile-recap (submitter):", e.message);
+    res.status(500).json({ error: e.message || "Gagal memperbarui rekap." });
+  }
+}
+
+app.post(
+  "/api/kas-kecil/compile-recap",
+  requireAuth,
+  attachFreshMember,
+  requireCsrf,
+  requireKasKecilSubmit,
+  compileRecapAfterSubmit
+);
+app.post(
+  "/api/kas-besar/compile-recap",
+  requireAuth,
+  attachFreshMember,
+  requireCsrf,
+  requireKasBesarSubmit,
+  compileRecapAfterSubmit
+);
 
 app.post(
   "/api/kas-kecil/transactions",

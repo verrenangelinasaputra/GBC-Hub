@@ -608,6 +608,114 @@ function showTxSubmitConfirmModal(summary) {
   });
 }
 
+/** Konfirmasi sebelum kirim batch (maks. 10 transaksi, satu entitas). */
+function showBatchSubmitConfirmModal(summary) {
+  return new Promise(resolve => {
+    document.getElementById("batchTxConfirmModal")?.remove();
+    const kind = summary.kindLabel || "Kas Kecil";
+    const dest = summary.destinationTab ? ` (tab ${summary.destinationTab})` : "";
+    const lines = summary.lines || [];
+    const rowsHtml = lines
+      .map(line => {
+        const bukti =
+          line.buktiFiles?.length > 0
+            ? `${line.buktiFiles.length} file (${escapeHtml(line.buktiFiles.map(f => f.name).join(", "))})`
+            : line.buktiLink
+              ? `Link: ${escapeHtml(line.buktiLink)}`
+              : "—";
+        return `<tr>
+          <th scope="row">#${line.index}</th>
+          <td>${escapeHtml(formatTanggalId(line.tanggal))}</td>
+          <td>${escapeHtml(line.categoryLabel)}</td>
+          <td>${escapeHtml(line.namaTransaksi || "—")}</td>
+          <td>${escapeHtml(line.amountLabel)}</td>
+          <td>${escapeHtml(line.sumberDana || "—")}</td>
+          <td class="batch-confirm-bukti">${bukti}</td>
+        </tr>`;
+      })
+      .join("");
+
+    const overlay = document.createElement("div");
+    overlay.id = "batchTxConfirmModal";
+    overlay.className = "confirm-modal";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-labelledby", "batchTxConfirmTitle");
+    overlay.innerHTML = `
+      <button type="button" class="confirm-modal-backdrop" aria-label="Tutup"></button>
+      <div class="confirm-modal-panel batch-confirm-panel">
+        <div class="confirm-modal-head">
+          <span class="confirm-modal-badge">Batch</span>
+          <h3 id="batchTxConfirmTitle">Konfirmasi kirim ${lines.length} transaksi</h3>
+          <p class="confirm-modal-lead">Semua baris akan disimpan untuk entitas <strong>${escapeHtml(summary.entitas)}</strong> ke <strong>${escapeHtml(kind)}</strong>${escapeHtml(dest)}. Proses berjalan satu per satu (upload bukti + spreadsheet), rekap diperbarui sekali di akhir.</p>
+        </div>
+        <div class="confirm-summary batch-confirm-table-wrap">
+          <table class="batch-confirm-table">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                <th scope="col">Tanggal</th>
+                <th scope="col">Kategori</th>
+                <th scope="col">Nama</th>
+                <th scope="col">Jumlah</th>
+                <th scope="col">Sumber dana</th>
+                <th scope="col">Bukti</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+        <p class="confirm-modal-note">Setelah Anda klik kirim, progress bar menampilkan transaksi ke berapa yang sedang diproses.</p>
+        <div class="confirm-modal-actions">
+          <button type="button" class="btn btn-soft btn-full-mobile" id="batchTxConfirmCancel">Batal, periksa lagi</button>
+          <button type="button" class="btn btn-primary btn-full-mobile" id="batchTxConfirmOk">Ya, kirim ${lines.length} transaksi</button>
+        </div>
+      </div>`;
+
+    document.body.append(overlay);
+    document.body.classList.add("confirm-modal-open");
+
+    let done = false;
+    const finish = ok => {
+      if (done) return;
+      done = true;
+      document.removeEventListener("keydown", onKey);
+      overlay.remove();
+      document.body.classList.remove("confirm-modal-open");
+      resolve(ok);
+    };
+    const onKey = ev => {
+      if (ev.key === "Escape") finish(false);
+    };
+    document.addEventListener("keydown", onKey);
+    overlay.querySelector("#batchTxConfirmCancel").addEventListener("click", () => finish(false));
+    overlay.querySelector(".confirm-modal-backdrop").addEventListener("click", () => finish(false));
+    overlay.querySelector("#batchTxConfirmOk").addEventListener("click", () => finish(true));
+    requestAnimationFrame(() => overlay.querySelector("#batchTxConfirmOk")?.focus());
+  });
+}
+
+function buildBatchLineFormData(entitas, line) {
+  const fd = new FormData();
+  fd.set("entitas", entitas);
+  fd.set("tanggal", line.tanggal);
+  fd.set("category", line.category);
+  if (line.category === OTHER_CATEGORY && line.categoryOther) {
+    fd.set("categoryOther", line.categoryOther);
+  }
+  fd.set("namaTransaksi", line.namaTransaksi);
+  fd.set("amount", line.amount);
+  fd.set("keterangan", line.keterangan);
+  fd.set("dibayarkan", line.dibayarkan);
+  fd.set("sumberDana", line.sumberDana);
+  if (line.bukti) fd.set("bukti", line.bukti);
+  const fileInput = line.card?.querySelector('input[type="file"]');
+  if (fileInput?.files?.length) {
+    for (const f of fileInput.files) fd.append("buktiFiles", f);
+  }
+  return fd;
+}
+
 function compactRupiah(value) {
   const v = Number(value) || 0;
   if (Math.abs(v) >= 1e9) return "Rp" + (v / 1e9).toFixed(1) + "M";
@@ -1488,6 +1596,7 @@ function renderRevisiBuktiList(listEl, hiddenInput, keptItems, onChange) {
 }
 
 const MAX_BUKTI_PER_TX = 5;
+const MAX_BATCH_TX = 10;
 
 function formatBuktiFileSize(bytes) {
   const n = Number(bytes);
@@ -1882,6 +1991,308 @@ async function openRevisiRowModal(ctx) {
   });
 }
 
+function bindBatchLineCategory(card, cats) {
+  const otherLabel = card.querySelector(".batch-other-label");
+  const otherInput = card.querySelector('[name="categoryOther"]');
+  const syncOther = val => {
+    const on = val === OTHER_CATEGORY;
+    otherLabel?.classList.toggle("hidden", !on);
+    if (otherInput) otherInput.required = on;
+    if (!on) otherInput.value = "";
+  };
+  return bindSearchCombo(card.querySelector(".batch-category-combo"), cats, { onCommit: syncOther });
+}
+
+function createBatchLineElement(index, ctx) {
+  const { isBesar, sumberList, cats, dis, uploadReady, uploadNote, buktiManualHint } = ctx;
+  const article = document.createElement("article");
+  article.className = "batch-tx-card";
+  article.dataset.batchLine = String(index);
+  article.innerHTML = `
+    <div class="batch-tx-card-head">
+      <strong>Transaksi #${index + 1}</strong>
+      <button type="button" class="btn btn-soft btn-sm batch-remove-line" ${index === 0 ? "hidden" : ""} aria-label="Hapus baris">Hapus baris</button>
+    </div>
+    <div class="form-grid batch-tx-grid">
+      <label>Tanggal <span class="req">*</span>
+        <input type="date" name="tanggal" class="batch-field-tanggal" required ${dis}>
+      </label>
+      <label>Kategori <span class="req">*</span>
+        <div class="combo batch-category-combo">
+          <input type="text" class="combo-input" placeholder="Cari kategori…" autocomplete="off" required ${dis}>
+          <input type="hidden" class="combo-value" name="category">
+          <ul class="combo-menu hidden" role="listbox"></ul>
+        </div>
+      </label>
+      <label class="batch-other-label hidden">Beban apa? <span class="req">*</span>
+        <input type="text" name="categoryOther" maxlength="120" ${dis}>
+      </label>
+      <label>Nama transaksi <span class="req">*</span>
+        <input type="text" name="namaTransaksi" required maxlength="200" ${dis}>
+      </label>
+      <label>Jumlah (Rp) <span class="req">*</span>
+        <input type="text" name="amount" inputmode="numeric" required ${dis}>
+      </label>
+      <label>${isBesar ? "Sumber dana Bank" : "Sumber dana Kas Kecil"} <span class="req">*</span>
+        <select name="sumberDana" required ${dis}>${formSelectOptions(sumberList, "—")}</select>
+      </label>
+      <label>Dibayarkan kepada <span class="req">*</span>
+        <input type="text" name="dibayarkan" required ${dis}>
+      </label>
+      <label class="batch-span-2">Keterangan
+        <textarea name="keterangan" rows="2" ${dis}></textarea>
+      </label>
+      ${
+        uploadReady
+          ? `<label class="batch-span-2">Bukti transaksi <span class="req">*</span>
+        <input type="file" name="bukti_${index}" accept="image/*,application/pdf,.pdf,.png,.jpg,.jpeg,.webp" multiple ${dis}>
+        <span class="form-hint">${escapeHtml(uploadNote)} Maks. ${MAX_BUKTI_PER_TX} file × 10 MB untuk transaksi ini.</span>
+      </label>`
+          : `<label class="batch-span-2">Link bukti <span class="req">*</span>
+        <input type="url" name="bukti" placeholder="https://drive.google.com/file/d/…" required ${dis}>
+        <span class="form-hint">${escapeHtml(buktiManualHint)}</span>
+      </label>`
+      }
+    </div>`;
+  const tanggal = article.querySelector(".batch-field-tanggal");
+  if (tanggal && !tanggal.value) tanggal.value = todayIso();
+  const combo = bindBatchLineCategory(article, cats);
+  article._batchCombo = combo;
+  return article;
+}
+
+function initBatchTransactionForm(panel, ctx) {
+  const form = panel.querySelector("#txBatchForm");
+  const container = panel.querySelector("#batchLinesContainer");
+  const addBtn = panel.querySelector("#batchAddLineBtn");
+  const msg = panel.querySelector("#txBatchMessage");
+  const submitBtn = panel.querySelector("#txBatchSubmit");
+  if (!form || !container || !addBtn) return;
+
+  const lineCombos = [];
+  let lineCount = 0;
+
+  const renumber = () => {
+    const cards = [...container.querySelectorAll(".batch-tx-card")];
+    lineCount = cards.length;
+    cards.forEach((card, i) => {
+      card.dataset.batchLine = String(i);
+      const head = card.querySelector(".batch-tx-card-head strong");
+      if (head) head.textContent = `Transaksi #${i + 1}`;
+      const rm = card.querySelector(".batch-remove-line");
+      if (rm) rm.classList.toggle("hidden", i === 0);
+      const fileInput = card.querySelector('input[type="file"]');
+      if (fileInput) fileInput.name = `bukti_${i}`;
+    });
+    addBtn.disabled = lineCount >= MAX_BATCH_TX;
+    addBtn.textContent =
+      lineCount >= MAX_BATCH_TX ? `Maks. ${MAX_BATCH_TX} transaksi` : "+ Tambah transaksi";
+  };
+
+  const addLine = () => {
+    if (lineCount >= MAX_BATCH_TX) return;
+    const card = createBatchLineElement(lineCount, ctx);
+    container.append(card);
+    lineCombos.push(card._batchCombo);
+    card.querySelector(".batch-remove-line")?.addEventListener("click", () => {
+      if (container.querySelectorAll(".batch-tx-card").length <= 1) return;
+      const idx = lineCombos.indexOf(card._batchCombo);
+      if (idx >= 0) lineCombos.splice(idx, 1);
+      card.remove();
+      renumber();
+    });
+    renumber();
+  };
+
+  addLine();
+
+  addBtn.addEventListener("click", () => addLine());
+
+  form.addEventListener("reset", () => {
+    setTimeout(() => {
+      container.replaceChildren();
+      lineCombos.length = 0;
+      addLine();
+    }, 0);
+  });
+
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
+    const entitas = fieldVal(form, "entitas");
+    if (!entitas) {
+      form.querySelector('[name="entitas"]')?.reportValidity();
+      return;
+    }
+    const cards = [...container.querySelectorAll(".batch-tx-card")];
+    const items = [];
+    let valid = true;
+
+    for (let i = 0; i < cards.length; i++) {
+      const card = cards[i];
+      const category = fieldVal(card, "category");
+      const comboInput = card.querySelector(".batch-category-combo .combo-input");
+      if (!ctx.cats.includes(category)) {
+        comboInput?.setCustomValidity("Pilih kategori dari daftar.");
+        comboInput?.reportValidity();
+        valid = false;
+        break;
+      }
+      comboInput?.setCustomValidity("");
+      const otherInput = card.querySelector('[name="categoryOther"]');
+      if (category === OTHER_CATEGORY && fieldVal(card, "categoryOther").length < 2) {
+        otherInput?.setCustomValidity("Isi nama beban (min. 2 karakter).");
+        otherInput?.reportValidity();
+        valid = false;
+        break;
+      }
+      otherInput?.setCustomValidity("");
+
+      const tanggal = fieldVal(card, "tanggal") || todayIso();
+      const amountNum = parseMoney(fieldVal(card, "amount"));
+      if (!amountNum || amountNum <= 0) {
+        card.querySelector('[name="amount"]')?.setCustomValidity("Nominal harus lebih dari 0.");
+        card.querySelector('[name="amount"]')?.reportValidity();
+        valid = false;
+        break;
+      }
+      card.querySelector('[name="amount"]')?.setCustomValidity("");
+
+      const fileInput = card.querySelector('input[type="file"]');
+      const hasFiles = (fileInput?.files?.length || 0) > 0;
+      const link = fieldVal(card, "bukti");
+      if (!hasFiles && !link) {
+        msg.className = "inline-message error";
+        msg.textContent = `Transaksi #${i + 1}: lampirkan bukti (file atau link).`;
+        msg.classList.remove("hidden");
+        return;
+      }
+      if ((fileInput?.files?.length || 0) > MAX_BUKTI_PER_TX) {
+        msg.className = "inline-message error";
+        msg.textContent = `Transaksi #${i + 1}: maks. ${MAX_BUKTI_PER_TX} file bukti.`;
+        msg.classList.remove("hidden");
+        return;
+      }
+
+      const amountRaw = fieldVal(card, "amount");
+      items.push({
+        card,
+        tanggal,
+        category,
+        categoryOther: category === OTHER_CATEGORY ? fieldVal(card, "categoryOther") : "",
+        categoryLabel:
+          category === OTHER_CATEGORY
+            ? `${OTHER_CATEGORY} — ${fieldVal(card, "categoryOther")}`
+            : category,
+        namaTransaksi: fieldVal(card, "namaTransaksi"),
+        amount: amountRaw,
+        amountLabel: rupiah(amountNum),
+        keterangan: fieldVal(card, "keterangan"),
+        dibayarkan: fieldVal(card, "dibayarkan"),
+        sumberDana: fieldVal(card, "sumberDana"),
+        bukti: link,
+        buktiFiles: fileInput?.files?.length ? [...fileInput.files].map(f => ({ name: f.name })) : [],
+        buktiLink: link || ""
+      });
+    }
+    if (!valid) return;
+
+    const confirmLines = items.map((line, i) => ({ ...line, index: i + 1 }));
+    const confirmed = await showBatchSubmitConfirmModal({
+      kindLabel: ctx.isBesar ? "Bank (Kas Besar)" : "Kas Kecil",
+      destinationTab: ctx.isBesar
+        ? state.links.kasBesarTab || "Bank"
+        : state.links.kasKecilTab || "KAS KECIL",
+      entitas,
+      lines: confirmLines
+    });
+    if (!confirmed) return;
+
+    const total = items.length;
+    const compileUrl = ctx.isBesar ? "/api/kas-besar/compile-recap" : "/api/kas-kecil/compile-recap";
+    const saved = [];
+    const failed = [];
+
+    submitBtn.disabled = true;
+    msg.className = "inline-message";
+    msg.textContent = `Menyimpan ${total} transaksi…`;
+    msg.classList.remove("hidden");
+    if (typeof progressStart === "function") progressStart(`Menyiapkan ${total} transaksi…`);
+    try {
+      for (let i = 0; i < items.length; i++) {
+        const n = i + 1;
+        const stepMsg = `Memproses transaksi ${n} dari ${total}…`;
+        if (typeof progressSetStep === "function") progressSetStep(n, total, stepMsg);
+        else if (typeof progressMessage === "function") progressMessage(stepMsg);
+        const fd = buildBatchLineFormData(entitas, items[i]);
+        try {
+          await api(ctx.apiBase, { method: "POST", body: fd, silentProgress: true });
+          saved.push(n);
+        } catch (lineErr) {
+          failed.push({ index: n, error: lineErr.message || "Gagal menyimpan." });
+        }
+      }
+      if (saved.length) {
+        if (typeof progressSetStep === "function") {
+          progressSetStep(total, total, "Memperbarui rekap…");
+        } else if (typeof progressMessage === "function") {
+          progressMessage("Memperbarui rekap…");
+        }
+        try {
+          await api(compileUrl, { method: "POST", silentProgress: true });
+        } catch (compileErr) {
+          console.warn("compile after batch:", compileErr.message);
+        }
+      }
+      const failLines = failed.map(f => `#${f.index}: ${f.error}`).join("\n");
+      if (failed.length) {
+        msg.className = "inline-message error";
+        msg.textContent = failLines || `${saved.length} tersimpan, ${failed.length} gagal.`;
+        toast(`${saved.length} tersimpan, ${failed.length} gagal. Lihat detail di bawah.`);
+      } else {
+        msg.className = "inline-message success";
+        msg.textContent = `${saved.length} transaksi tersimpan. Rekap diperbarui.`;
+        toast(`${saved.length} transaksi tersimpan.`);
+      }
+      if (saved.length > 0) {
+        form.querySelector('[name="entitas"]').value = "";
+        container.replaceChildren();
+        lineCombos.length = 0;
+        addLine();
+        if (ctx.onSaved) await ctx.onSaved();
+      }
+    } catch (err) {
+      msg.className = "inline-message error";
+      msg.textContent = err.message;
+      toast(err.message);
+    } finally {
+      if (typeof progressDone === "function") progressDone();
+      submitBtn.disabled = false;
+    }
+  });
+}
+
+function initFormModeSwitch(panel, batchCtx) {
+  const single = panel.querySelector("#txForm");
+  const batch = panel.querySelector("#txBatchForm");
+  const btns = [...panel.querySelectorAll(".form-mode-btn")];
+  if (!single || !batch || !btns.length) return;
+  panel._batchCtx = batchCtx;
+
+  const setMode = mode => {
+    const batchOn = mode === "batch";
+    single.classList.toggle("hidden", batchOn);
+    batch.classList.toggle("hidden", !batchOn);
+    btns.forEach(b => b.classList.toggle("is-active", b.dataset.formMode === mode));
+  };
+  btns.forEach(b => {
+    b.addEventListener("click", () => setMode(b.dataset.formMode || "single"));
+  });
+  if (!panel.dataset.batchInited) {
+    panel.dataset.batchInited = "1";
+    initBatchTransactionForm(panel, batchCtx);
+  }
+}
+
 function renderKasPage(root, kind, layout = "form") {
   const isBesar = kind === "kas_besar";
   const isRevisi = layout === "revisi";
@@ -1943,6 +2354,14 @@ function renderKasPage(root, kind, layout = "form") {
       ${showForm ? `<article class="panel primary-shortcut" id="txFormPanel">
         <div class="form-title"><span class="feature-icon">＋</span><div><h3>${escapeHtml(formTitle)}</h3><p>GBC Cash Management — pertanyaan selaras formulir resmi.</p></div></div>
         ${canSubmit ? "" : '<div class="inline-message">Anda belum punya akses input halaman ini. Hubungi admin untuk mengaktifkan Kas Kecil dan/atau Bank.</div>'}
+        ${
+          canSubmit
+            ? `<div class="form-mode-switch" role="tablist" aria-label="Mode input">
+          <button type="button" class="btn btn-soft btn-sm form-mode-btn is-active" data-form-mode="single">Satu transaksi</button>
+          <button type="button" class="btn btn-soft btn-sm form-mode-btn" data-form-mode="batch">Beberapa (maks. ${MAX_BATCH_TX})</button>
+        </div>`
+            : ""
+        }
         <form class="form-grid" id="txForm" enctype="multipart/form-data" novalidate>
           <label>1. Tanggal Pengeluaran <span class="req">*</span>
             <input type="date" name="tanggal" required ${dis}>
@@ -2014,6 +2433,29 @@ function renderKasPage(root, kind, layout = "form") {
             ${canSubmit ? '<button class="btn btn-primary" type="submit" id="txSubmit">Simpan &amp; update rekap</button><button class="btn btn-soft" type="reset">Reset</button>' : ""}
           </div>
         </form>
+        ${
+          canSubmit
+            ? `<form class="form-grid hidden" id="txBatchForm" enctype="multipart/form-data" novalidate>
+          <p class="form-hint batch-intro">Satu entitas untuk semua baris. Kategori dan sumber dana boleh berbeda tiap transaksi. Setiap baris punya bukti sendiri (rename file per transaksi).</p>
+          <label>Entitas pengeluaran (sama untuk seluruh batch) <span class="req">*</span>
+            <select name="entitas" required>${formSelectOptions(entities, "— Pilih entitas —")}</select>
+          </label>
+          <div id="batchLinesContainer" class="batch-lines"></div>
+          <div class="batch-toolbar">
+            <button type="button" class="btn btn-soft btn-sm" id="batchAddLineBtn">+ Tambah transaksi</button>
+          </div>
+          <label>Nama PIC
+            <input type="text" value="${escapeHtml(picName)}" readonly class="input-locked" tabindex="-1">
+            <span class="form-hint">Terisi otomatis dari akun yang login.</span>
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="txBatchSubmit">Simpan semua &amp; update rekap</button>
+            <button type="reset" class="btn btn-soft">Reset batch</button>
+          </div>
+          <div id="txBatchMessage" class="inline-message hidden"></div>
+        </form>`
+            : ""
+        }
         <div id="txFormMessage" class="inline-message hidden"></div>
       </article>` : ""}
       ${showHistory ? `<article class="panel shortcut-card">
@@ -2248,6 +2690,21 @@ function renderKasPage(root, kind, layout = "form") {
     });
   }
 
+  if (canSubmit && showForm) {
+    const batchCtx = {
+      apiBase,
+      cats,
+      isBesar,
+      sumberList,
+      dis,
+      uploadReady: !!state.driveUploadReady,
+      uploadNote,
+      buktiManualHint,
+      onSaved: null
+    };
+    initFormModeSwitch($("#txFormPanel"), batchCtx);
+  }
+
   if (!showHistory) return;
 
   const notice = $("#sheetNotice");
@@ -2281,6 +2738,14 @@ function renderKasPage(root, kind, layout = "form") {
   let order = "desc";
   let displayHeaders = [];
   let forceSheetRefresh = false;
+
+  if (canSubmit && showForm) {
+    const panel = $("#txFormPanel");
+    if (panel?._batchCtx) panel._batchCtx.onSaved = async () => {
+      page = 1;
+      await loadTable();
+    };
+  }
 
   async function loadTable() {
     const msg = $("#tableMessage");
