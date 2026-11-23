@@ -708,7 +708,8 @@ function buildBatchLineFormData(entitas, line) {
   fd.set("keterangan", line.keterangan);
   fd.set("dibayarkan", line.dibayarkan);
   fd.set("sumberDana", line.sumberDana);
-  if (line.bukti) fd.set("bukti", line.bukti);
+  const buktiLink = normalizeBuktiLinkInput(line.bukti);
+  if (buktiLink) fd.set("bukti", buktiLink);
   const fileInput = line.card?.querySelector('input[type="file"]');
   if (fileInput?.files?.length) {
     for (const f of fileInput.files) fd.append("buktiFiles", f);
@@ -989,10 +990,28 @@ function buktiUploadNoteForForm() {
 function buktiManualLinkHintForForm() {
   if (state.driveUploadReady) return "";
   if (!canConnectDriveOAuth()) {
-    return "Tempel link file bukti yang sudah di-upload ke Drive (contoh: https://drive.google.com/file/d/…/view).";
+    return "Upload foto lewat form sedang nonaktif. Unggah bukti lewat aplikasi Google Drive dulu, lalu tempel link di sini (harus diawali https://).";
   }
   return "Sementara upload otomatis belum aktif, tempel link file yang sudah di-upload manual.";
 }
+
+function normalizeBuktiLinkInput(raw) {
+  return String(raw || "")
+    .trim()
+    .replace(/^[\s\u200b\uFEFF]+|[\s\u200b\uFEFF]+$/g, "");
+}
+
+/** Validasi longgar — hindari type=url di HP yang sering menolak link Drive. */
+function buktiLinkLooksValid(raw) {
+  const t = normalizeBuktiLinkInput(raw);
+  if (t.length < 15) return false;
+  if (/^https?:\/\//i.test(t)) return true;
+  if (/drive\.google\.com|docs\.google\.com/i.test(t)) return true;
+  return false;
+}
+
+const BUKTI_LINK_INPUT_ATTRS =
+  'type="text" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false"';
 
 function kasNavGroup(kind) {
   const isBesar = kind === "kas_besar";
@@ -2049,7 +2068,7 @@ function createBatchLineElement(index, ctx) {
         <span class="form-hint">${escapeHtml(uploadNote)} Maks. ${MAX_BUKTI_PER_TX} file × 10 MB untuk transaksi ini.</span>
       </label>`
           : `<label class="batch-span-2">Link bukti <span class="req">*</span>
-        <input type="url" name="bukti" placeholder="https://drive.google.com/file/d/…" required ${dis}>
+        <input name="bukti" ${BUKTI_LINK_INPUT_ATTRS} placeholder="https://drive.google.com/file/d/…/view" required ${dis}>
         <span class="form-hint">${escapeHtml(buktiManualHint)}</span>
       </label>`
       }
@@ -2159,13 +2178,24 @@ function initBatchTransactionForm(panel, ctx) {
 
       const fileInput = card.querySelector('input[type="file"]');
       const hasFiles = (fileInput?.files?.length || 0) > 0;
-      const link = fieldVal(card, "bukti");
+      const linkRaw = fieldVal(card, "bukti");
+      const link = normalizeBuktiLinkInput(linkRaw);
+      const linkInput = card.querySelector('[name="bukti"]');
       if (!hasFiles && !link) {
         msg.className = "inline-message error";
         msg.textContent = `Transaksi #${i + 1}: lampirkan bukti (file atau link).`;
         msg.classList.remove("hidden");
         return;
       }
+      if (!hasFiles && link && !buktiLinkLooksValid(link)) {
+        linkInput?.setCustomValidity(
+          "Link tidak dikenali. Tempel link lengkap dari Google Drive (contoh: https://drive.google.com/file/d/…/view)."
+        );
+        linkInput?.reportValidity();
+        valid = false;
+        break;
+      }
+      linkInput?.setCustomValidity("");
       if ((fileInput?.files?.length || 0) > MAX_BUKTI_PER_TX) {
         msg.className = "inline-message error";
         msg.textContent = `Transaksi #${i + 1}: maks. ${MAX_BUKTI_PER_TX} file bukti.`;
@@ -2191,7 +2221,7 @@ function initBatchTransactionForm(panel, ctx) {
         sumberDana: fieldVal(card, "sumberDana"),
         bukti: link,
         buktiFiles: fileInput?.files?.length ? [...fileInput.files].map(f => ({ name: f.name })) : [],
-        buktiLink: link || ""
+        buktiLink: link
       });
     }
     if (!valid) return;
@@ -2410,7 +2440,7 @@ function renderKasPage(root, kind, layout = "form") {
             <ul class="bukti-files-list" id="buktiFilesList" aria-live="polite"></ul>
           </div>
           <label>Link bukti (opsional jika sudah upload)
-            <input type="url" name="bukti" placeholder="https://drive.google.com/..." ${dis}>
+            <input name="bukti" ${BUKTI_LINK_INPUT_ATTRS} placeholder="https://drive.google.com/..." ${dis}>
           </label>`
               : `<div class="bukti-link-panel inline-message">
             <b>9. Bukti Transaksi</b> — ${escapeHtml(uploadNote)}
@@ -2421,7 +2451,7 @@ function renderKasPage(root, kind, layout = "form") {
             }
           </div>
           <label>Link bukti transaksi <span class="req">*</span>
-            <input type="url" name="bukti" placeholder="https://drive.google.com/file/d/…/view" required ${dis}>
+            <input name="bukti" ${BUKTI_LINK_INPUT_ATTRS} placeholder="https://drive.google.com/file/d/…/view" required ${dis}>
             <span class="form-hint">${escapeHtml(buktiManualHint)}</span>
           </label>`
           }
@@ -2436,6 +2466,11 @@ function renderKasPage(root, kind, layout = "form") {
         ${
           canSubmit
             ? `<form class="form-grid hidden" id="txBatchForm" enctype="multipart/form-data" novalidate>
+          ${
+            state.driveUploadReady
+              ? ""
+              : `<p class="inline-message batch-upload-off-notice">Upload foto langsung dari form sedang nonaktif di server. Untuk setiap transaksi: unggah bukti dulu di aplikasi <strong>Google Drive</strong>, salin link file (Share), lalu tempel di kolom <strong>Link bukti</strong> di bawah. Admin bisa mengaktifkan upload otomatis lagi lewat menu Hubungkan Drive.</p>`
+          }
           <p class="form-hint batch-intro">Satu entitas untuk semua baris. Kategori dan sumber dana boleh berbeda tiap transaksi. Setiap baris punya bukti sendiri (rename file per transaksi).</p>
           <label>Entitas pengeluaran (sama untuk seluruh batch) <span class="req">*</span>
             <select name="entitas" required>${formSelectOptions(entities, "— Pilih entitas —")}</select>
@@ -2623,6 +2658,19 @@ function renderKasPage(root, kind, layout = "form") {
         return;
       }
       otherInput?.setCustomValidity("");
+      if (!state.driveUploadReady) {
+        const linkEl = txForm.querySelector('[name="bukti"]');
+        const link = normalizeBuktiLinkInput(fieldVal(txForm, "bukti"));
+        if (!buktiLinkLooksValid(link)) {
+          linkEl?.setCustomValidity(
+            "Link bukti wajib. Tempel link lengkap Google Drive (https://drive.google.com/file/d/…)."
+          );
+          linkEl?.reportValidity();
+          return;
+        }
+        linkEl?.setCustomValidity("");
+        if (linkEl && link) linkEl.value = link;
+      }
       if (!txForm.checkValidity()) {
         txForm.reportValidity();
         return;

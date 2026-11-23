@@ -12,6 +12,7 @@ Solusi: **OAuth** — sekali login Google (akun yang punya folder bukti), server
    - User type: **External** (Gmail) atau Internal (Workspace)
    - Isi app name, email support → Save
    - **Test users**: tambah email Google Anda (jika app masih "Testing")
+   - **Penting — agar tidak error tiap minggu:** jika status app masih **Testing**, refresh token Google **kedaluwarsa ±7 hari**. **Publish app** ke **Production** (OAuth consent screen → Publish app) supaya token bertahan lama. Tanpa publish, Anda akan terus perlu Hubungkan Drive + update `GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN` di Vercel.
 3. **APIs & Services → Credentials → Create Credentials → OAuth client ID**
    - Type: **Web application**
    - **Authorized redirect URIs** (wajib persis):
@@ -37,8 +38,10 @@ Restart `npm start`.
 2. Buka **Kas Besar** atau **Kas Kecil**
 3. Klik **Hubungkan Google Drive (super admin, sekali)**
 4. Login Google (**akun yang punya folder bukti**), Allow
-5. Halaman menampilkan `GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN=...` → copy ke `.env`
+5. Halaman menampilkan `GOOGLE_DRIVE_OAUTH_REFRESH_TOKEN=...` → copy ke `.env` (di **Vercel**: Environment Variables, lalu **Redeploy**)
 6. Restart server lagi → **Ctrl+F5** form → **Choose Files** aktif
+
+**Jangan hanya klik Hubungkan tanpa update token di Vercel** — env lama tetap dipakai sampai token diganti dan deploy ulang.
 
 Folder bukti harus **milik akun Google yang sama** saat OAuth (atau Anda punya akses tulis).
 

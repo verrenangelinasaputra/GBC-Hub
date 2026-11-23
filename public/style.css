@@ -64,6 +64,7 @@ a.nav-link{text-decoration:none}
 .batch-confirm-table thead th{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#6b7894;background:#eef2fa;position:sticky;top:0}
 .batch-confirm-table tbody th{font-weight:700;color:#405cc6;white-space:nowrap}
 .batch-confirm-bukti{max-width:160px;word-break:break-word}
+.batch-upload-off-notice{margin-bottom:12px;line-height:1.55}
 .revisi-modal-form{margin:0;padding:0;max-height:min(62vh,560px);overflow:auto;padding-right:4px;padding-bottom:8px}
 .revisi-modal-panel .combo-menu{z-index:10050}
 .revisi-modal-actions{width:100%;align-items:center;justify-content:space-between;flex-wrap:wrap;row-gap:10px}
